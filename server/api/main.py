@@ -98,6 +98,23 @@ async def get_transcripts(room_id: str) -> list[dict]:
     return await get_store().get_transcripts(room_id)
 
 
+class TranscriptAppend(BaseModel):
+    role: str  # user | assistant
+    text: str
+    language: str = ""
+
+
+@app.post("/sessions/{room_id}/transcripts")
+async def append_transcript(room_id: str, data: TranscriptAppend) -> dict:
+    """Transcript persistence for the voicepipe (LiveKit-free) agent path."""
+    if data.role not in ("user", "assistant"):
+        raise HTTPException(422, "role must be user or assistant")
+    await get_store().append_transcript(
+        room_id, data.role, data.text, language=data.language
+    )
+    return {"status": "ok"}
+
+
 @app.get("/sessions/{room_id}/summary")
 async def get_summary(room_id: str) -> dict:
     """Generate an on-demand EHR summary from stored transcripts (POST-call recovery path)."""
