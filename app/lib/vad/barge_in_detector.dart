@@ -1,14 +1,11 @@
 import 'dart:math';
-
-// ignore: implementation_imports - createAudioFrameCapture isn't publicly exported
-import 'package:livekit_client/src/audio/audio_frame_capture.dart'
-    show AudioFrame;
+import 'dart:typed_data';
 
 /// Energy-based voice activity detection for instant local barge-in.
 ///
-/// Processes raw PCM frames from [AudioFrameCapture] and detects speech using an
-/// RMS threshold with hangover counters (voiced/silent frame counts). Runs fully
-/// on-device with no native dependencies — the server-side Silero VAD remains the
+/// Processes raw PCM16 frames and detects speech using an RMS threshold with
+/// hangover counters (voiced/silent frame counts). Runs fully on-device with
+/// no native dependencies — the server-side Silero VAD remains the
 /// authoritative barge-in detector; this one exists purely for instant local
 /// ducking + a fast data-channel signal to the agent.
 class BargeInDetector {
@@ -44,11 +41,8 @@ class BargeInDetector {
   int _voicedRun = 0;
   int _silentRun = 0;
 
-  /// Feed a raw PCM frame (int16) captured from the microphone.
-  void process(AudioFrame frame) {
-    final data = frame.data;
-    final channels = frame.channels;
-
+  /// Feed raw PCM16 (little-endian int16) captured from the microphone.
+  void process(Uint8List data, {int channels = 1}) {
     for (var i = 0; i + 1 < data.length; i += 2) {
       // int16 little-endian -> sample in [-1, 1]
       final raw = data[i] | (data[i + 1] << 8);

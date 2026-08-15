@@ -1,13 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:livekit_client/livekit_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:voicepipe_flutter/voicepipe_flutter.dart';
 
 import '../config.dart';
 import '../services/api_client.dart';
-import '../vad/barge_in_controller.dart';
 
 enum CallPhase { idle, connecting, connected, error }
 
@@ -25,21 +23,25 @@ class TranscriptLine {
   });
 }
 
+/// Voice call state driven by [VoiceCallController] (voicepipe transport):
+/// microphone -> WebRTC -> voicepipe agent, with the `agent.events`
+/// data-channel contract (user_transcript / assistant_text / agent_state /
+/// summary). Barge-in is handled server-side by the agent's own VAD.
 class CallState extends ChangeNotifier {
   final ApiClient _api = ApiClient();
 
   bool _disposed = false;
 
+  VoiceCallController? _call;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
+  StreamSubscription<VoiceCallPhase>? _phaseSub;
+  RealtimeChannel? _ehrChannel;
+  String? _roomId;
+
   @override
   void notifyListeners() {
     if (!_disposed) super.notifyListeners();
   }
-
-  Room? _room;
-  EventsListener<RoomEvent>? _listener;
-  BargeInController? _bargeIn;
-  RealtimeChannel? _ehrChannel;
-  String? _roomId;
 
   CallPhase phase = CallPhase.idle;
   String error = '';
@@ -54,42 +56,36 @@ class CallState extends ChangeNotifier {
   bool get isConnected => phase == CallPhase.connected;
 
   Future<void> startCall() async {
-    if (_room != null) return;
+    if (_call != null) return;
     phase = CallPhase.connecting;
     error = '';
     notifyListeners();
 
     try {
-      final token = await _api.fetchToken(userId: AppConfig.defaultUserId);
-      _roomId = token.room;
+      final call = VoiceCallController(signalingUrl: AppConfig.signalingUrl);
+      _call = call;
 
-      final room = Room(
-        roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
-      );
-      await room.connect(token.url, token.token);
-      await room.localParticipant?.setMicrophoneEnabled(true);
+      _phaseSub = call.phase.listen((p) {
+        if (_disposed) return;
+        switch (p) {
+          case VoiceCallPhase.connecting:
+            phase = CallPhase.connecting;
+          case VoiceCallPhase.connected:
+            phase = CallPhase.connected;
+          case VoiceCallPhase.error:
+            phase = CallPhase.error;
+            error = 'Call failed';
+          case VoiceCallPhase.idle:
+            phase = CallPhase.idle;
+        }
+        notifyListeners();
+      });
 
-      _room = room;
-      final bargeIn = BargeInController(room: room);
-      _bargeIn = bargeIn;
-      _listener = room.createListener()
-        ..on<DataReceivedEvent>(_onDataReceived)
-        ..on<ParticipantConnectedEvent>((e) {
-          if (e.participant.kind == ParticipantKind.AGENT) {
-            agentState = 'connected';
-            notifyListeners();
-          }
-        })
-        ..on<TrackSubscribedEvent>((e) {
-          if (e.participant.kind == ParticipantKind.AGENT &&
-              e.track is RemoteAudioTrack) {
-            bargeIn.setAgentTrack(e.track as RemoteAudioTrack);
-          }
-        });
+      _eventsSub = call.events.listen(_onEvent);
 
-      _armBargeIn(bargeIn);
-      _subscribeEhrRealtime();
+      await call.start();
       micEnabled = true;
+      _subscribeEhrRealtime();
       phase = CallPhase.connected;
       notifyListeners();
     } catch (e) {
@@ -99,44 +95,27 @@ class CallState extends ChangeNotifier {
     }
   }
 
-  /// Grabs the published mic track (may arrive a tick after unmute) and arms
-  /// the local barge-in detector on its raw PCM stream.
-  Future<void> _armBargeIn(BargeInController controller) async {
-    for (var attempt = 0; attempt < 20; attempt++) {
-      final pub = _room?.localParticipant?.audioTrackPublications
-          .where((p) => p.kind == TrackType.AUDIO)
-          .firstOrNull;
-      final micTrack = pub?.track;
-      if (micTrack is LocalAudioTrack) {
-        await controller.start(micTrack);
-        return;
-      }
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-    debugPrint('[barge-in] mic track not found, detector not armed');
-  }
-
   Future<void> endCall() async {
-    final room = _room;
-    _room = null;
+    final call = _call;
+    _call = null;
     _roomId = null;
     phase = CallPhase.idle;
     _summary = null;
     notifyListeners();
-    await _listener?.dispose();
-    _listener = null;
+    await _eventsSub?.cancel();
+    _eventsSub = null;
+    await _phaseSub?.cancel();
+    _phaseSub = null;
     await _ehrChannel?.unsubscribe();
     _ehrChannel = null;
-    await _bargeIn?.stop();
-    _bargeIn = null;
-    await room?.disconnect();
+    await call?.end();
   }
 
   Future<void> toggleMic() async {
-    final room = _room;
-    if (room == null) return;
+    final call = _call;
+    if (call == null) return;
     micEnabled = !micEnabled;
-    await room.localParticipant?.setMicrophoneEnabled(micEnabled);
+    await call.setMicEnabled(micEnabled);
     notifyListeners();
   }
 
@@ -164,24 +143,23 @@ class CallState extends ChangeNotifier {
           schema: 'public',
           table: 'ehr_summaries',
           callback: (payload) {
-    final row = payload.newRecord;
-    final summary = row['summary'];
-    if (summary is Map<String, dynamic>) {
-      _summary = summary;
-      notifyListeners();
-    }
+            final row = payload.newRecord;
+            final summary = row['summary'];
+            if (summary is Map<String, dynamic>) {
+              _summary = summary;
+              notifyListeners();
+            }
           },
         );
     _ehrChannel = channel;
     channel.subscribe();
   }
 
-  void _onDataReceived(DataReceivedEvent e) {
-    if (e.topic != 'agent.events') return;
-    final payload = _decodePayload(e.data);
-    if (payload == null) return;
-
+  void _onEvent(Map<String, dynamic> payload) {
     switch (payload['type']) {
+      case 'connected':
+        _roomId = payload['room'] as String?;
+        break;
       case 'user_transcript':
         transcript.add(TranscriptLine(
           role: 'user',
@@ -207,19 +185,12 @@ class CallState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Map<String, dynamic>? _decodePayload(List<int> data) {
-    try {
-      return jsonDecode(utf8.decode(data)) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
-
   @override
   void dispose() {
     _disposed = true;
-    _listener?.dispose();
-    _room?.disconnect();
+    _eventsSub?.cancel();
+    _phaseSub?.cancel();
+    _call?.dispose();
     super.dispose();
   }
 }

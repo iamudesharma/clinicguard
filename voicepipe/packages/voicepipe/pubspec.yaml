@@ -1,0 +1,25 @@
+name: voicepipe
+description: >-
+  Minimal open-source voice-agent framework for Dart. Server-side WebRTC
+  transport, signaling, speech (sherpa-onnx: VAD/STT/TTS), LLM interface,
+  and the conversation loop — all pure Dart, <300 MB.
+version: 0.2.0
+repository: https://github.com/example/voicepipe # TODO: set real repo
+publish_to: none # TODO: publish to pub.dev when API is stable
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  http: ^1.2.0
+  opus_codec_dart: ^3.0.5
+  shelf: ^1.4.0
+  shelf_web_socket: ^3.0.0
+  web_socket_channel: ^3.0.3
+  webrtc_dart: ^0.25.3
+  sherpa_onnx:
+    path: ../../third_party/sherpa_onnx
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.31.2

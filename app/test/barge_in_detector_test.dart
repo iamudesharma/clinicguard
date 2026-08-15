@@ -2,8 +2,6 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-// ignore: implementation_imports
-import 'package:livekit_client/src/audio/audio_frame_capture.dart' as ac;
 
 import 'package:clinic_guard/vad/barge_in_detector.dart';
 
@@ -19,8 +17,6 @@ Uint8List _pcmFrames(int count, double amplitude) {
   return bytes;
 }
 
-ac.AudioFrame _frame(Uint8List data) =>
-    ac.AudioFrame(sampleRate: 16000, channels: 1, data: data, format: ac.AudioFormat.Int16);
 
 void main() {
   test('detects speech start on loud audio and end on silence', () {
@@ -35,14 +31,14 @@ void main() {
 
     // 0.4s loud (amplitude 0.5 -> rms ~0.35) in 20ms frames
     for (var i = 0; i < 20; i++) {
-      vad.process(_frame(_pcmFrames(320, 0.5)));
+      vad.process(_pcmFrames(320, 0.5));
     }
     expect(starts, 1, reason: 'speech start must fire exactly once');
     expect(vad.isSpeaking, isTrue);
 
     // 0.6s silence (rms 0)
     for (var i = 0; i < 30; i++) {
-      vad.process(_frame(_pcmFrames(320, 0.0)));
+      vad.process(_pcmFrames(320, 0.0));
     }
     expect(ends, 1, reason: 'speech end must fire after hangover');
     expect(vad.isSpeaking, isFalse);
@@ -58,10 +54,10 @@ void main() {
       onSpeechEnd: () {},
     );
     // two loud frames then silence - below the 3-frame threshold
-    vad.process(_frame(_pcmFrames(320, 0.5)));
-    vad.process(_frame(_pcmFrames(320, 0.5)));
+    vad.process(_pcmFrames(320, 0.5));
+    vad.process(_pcmFrames(320, 0.5));
     for (var i = 0; i < 10; i++) {
-      vad.process(_frame(_pcmFrames(320, 0.0)));
+      vad.process(_pcmFrames(320, 0.0));
     }
     expect(starts, 0, reason: 'short noise must not trigger barge-in');
   });
@@ -77,7 +73,7 @@ void main() {
     );
     // amplitude 0.03 -> rms ~0.02, below threshold
     for (var i = 0; i < 10; i++) {
-      vad.process(_frame(_pcmFrames(320, 0.03)));
+      vad.process(_pcmFrames(320, 0.03));
     }
     expect(starts, 0);
   });

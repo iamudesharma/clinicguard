@@ -1,0 +1,14 @@
+name: poc_server
+description: >-
+  voicepipe POC: pure-Dart WebRTC server (loopback transport test) + voice
+  agent server (VAD/STT/LLM/TTS). Flutter/web client in ../poc_client.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  opus_codec_dart: ^3.0.5
+  web_socket_channel: ^3.0.3
+  voicepipe:
+    path: ../../packages/voicepipe
