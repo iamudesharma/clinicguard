@@ -1,0 +1,21 @@
+[project]
+name = "voice-dispatcher-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "faster-whisper>=1.2.1",
+    "groq>=1.6.0",
+    "kokoro-onnx>=0.5.0",
+    "livekit-agents[cartesia,deepgram,groq,openai,silero]>=1.6.10",
+    "livekit-api>=1.2.0",
+    "misaki[en,hi]>=0.9.4",
+    "piper-tts>=1.6.1",
+    "pydantic>=2.13.4",
+    "pydantic-ai>=2.31.0",
+    "pydantic-settings>=2.15.0",
+    "supabase>=2.31.0",
+    "uvicorn[standard]>=0.52.3",
+]

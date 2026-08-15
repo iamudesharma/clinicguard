@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Downloaded voice/model weights
+server/models/
+
+# macOS
+.DS_Store
+
+# Flutter/Dart
+app/build/
+app/.dart_tool/
+app/.flutter-plugins*
+app/ios/Pods/
+app/ios/.symlinks/
+app/android/.gradle/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
