@@ -3,12 +3,14 @@
 # 🏥 ClinicGuard — Voice AI Clinical Triage Dispatcher
 
 **Low-latency, multilingual (English + Hindi) voice triage demo.**
-Flutter client (iOS · Android · Web · macOS) + Python voice agent — built entirely on free tiers.
+Flutter client (iOS · Android · Web · macOS) + a 100% Dart voice agent
+(`voice_forge`) + Python control plane — built entirely on free tiers.
 
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)
 ![Dart](https://img.shields.io/badge/Dart-voice_forge-0175C2?logo=dart)
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python)
-![LiveKit](https://img.shields.io/badge/LiveKit-Agents-00B8A9)
+![voice_forge](https://img.shields.io/badge/voice_forge-LiveKit--free-00B8A9)
+![pub.dev](https://img.shields.io/badge/pub.dev-published-0175C2)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 </div>
@@ -31,6 +33,22 @@ The full voice pipeline runs on **free tiers and local models** — no per-call 
 > The Python backend remains the control plane (patients, summaries, Supabase).
 > The legacy LiveKit path still works; see [voice_forge/README.md](voice_forge/README.md).
 
+## 📦 Published packages on pub.dev
+
+The voice-agent framework is published on pub.dev and installs like any
+regular dependency (`dart pub add voice_forge` / `flutter pub add
+voice_forge_flutter`):
+
+| Package | Version | What it is |
+|---------|---------|------------|
+| [voice_forge](https://pub.dev/packages/voice_forge) | ![pub](https://img.shields.io/pub/v/voice_forge) | Server-side voice-agent framework: WebRTC transport, signaling, speech (sherpa-onnx VAD/STT/TTS), LLM interface, conversation loop — all pure Dart |
+| [voice_forge_flutter](https://pub.dev/packages/voice_forge_flutter) | ![pub](https://img.shields.io/pub/v/voice_forge_flutter) | Flutter client: `VoiceCallController` — mic → WebRTC → agent, the `agent.events` data-channel contract, playback + barge-in |
+| [voice_forge_speech](https://pub.dev/packages/voice_forge_speech) | ![pub](https://img.shields.io/pub/v/voice_forge_speech) | Vendored pure-Dart sherpa-onnx FFI bindings (VAD / ASR / TTS), Flutter-free — the speech stack behind the framework |
+
+No manual setup for package users: `SherpaKit.load()` auto-downloads the
+native library (`~/.cache/voice_forge/native/`) and any missing standard
+speech models on first run.
+
 ## 🧠 Features
 
 - **Instant barge-in** — server-side Silero VAD is authoritative: when you talk
@@ -40,8 +58,9 @@ The full voice pipeline runs on **free tiers and local models** — no per-call 
   voice_forge agent; the Python path uses a custom `faster-whisper` plugin.
 - **Local TTS** — sherpa-onnx Piper (en + hi voices); the Python path adds
   optional **Kokoro-82M ONNX**.
-- **Multiple LLM providers** — Groq, OpenRouter, or **OpenCode Zen** (OpenAI-compatible),
-  with automatic **429 failover + cooldown**.
+- **Multiple LLM providers** — Cline, OpenCode Zen/Go, Gemini, OpenRouter,
+  Groq, or OpenAI (all OpenAI-compatible), with automatic 429 failover +
+  cooldown and an offline `EchoLlm` fallback when no key is set.
 - **Live EHR extraction** — Pydantic-AI structured output every 3 turns and at call end;
   the summary card updates in real time over the data channel **and** Supabase realtime.
 - **Clinical tool chain** — `register_patient`, `record_vitals`, `add_symptom`,
@@ -57,7 +76,7 @@ Flutter app (iOS/Android/web/macOS)          [voice_forge_flutter package]
 │  mic → WebRTC (flutter_webrtc) ──ws /signal──►  voice_forge Dart agent
 │  data channel "agent.events" ◄──────────────┤  webrtc_dart (SFU-free P2P)
 │  (user_transcript / assistant_text /         │  Opus → Silero VAD → Whisper STT
-│   agent_state / summary / barge_in)          │  → Groq/OpenAI LLM → Piper TTS
+│   agent_state / summary / barge_in)          │  → Cline/OpenCode/Gemini/Groq LLM → Piper TTS
 └──────────────┬───────────────────────────────┘  transcripts POST /sessions/{id}/transcripts
                ▼
 [ Python FastAPI control plane ]  patients · summaries · Supabase (EHR realtime)
@@ -90,8 +109,9 @@ server/   Python backend (control plane + legacy LiveKit agent)
   api/main.py             FastAPI: /token, /patients, /sessions/{id}/summary, /transcripts, /rag/{status,search,ingest}
   supabase/schema.sql     tables + RLS policies
 voice_forge/  100% Dart voice-agent framework (LiveKit-free, see voice_forge/README.md)
-  packages/voice_forge            transport + speech (sherpa-onnx) + LLM + session loop
-  packages/voice_forge_flutter    VoiceCallController (flutter_webrtc client)
+  packages/voice_forge            → pub.dev/packages/voice_forge  (framework core)
+  packages/voice_forge_flutter    → pub.dev/packages/voice_forge_flutter  (Flutter client)
+  packages/voice_forge_speech     → pub.dev/packages/voice_forge_speech  (sherpa-onnx bindings)
   examples/clinicguard_agent    THIS project's triage agent (greeting, summary, EHR bridge)
   examples/poc_server|client    transport + agent POCs with self-tests
 app/      Flutter client (iOS, Android, Web, macOS)
@@ -113,13 +133,16 @@ docs/     demo script + tunneling guide
 
 | Service | Needed for | Sign up |
 |---|---|---|
-| **LiveKit Cloud** | realtime voice transport | https://cloud.livekit.io → create project → **Project Settings → Keys** (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) |
+| **Cline** *(recommended)* | default LLM for the voice_forge agent | https://app.cline.bot → API keys |
+| **OpenCode Zen** *(optional)* | LLM via your subscription | https://opencode.ai/auth → copy API key |
 | **Groq** | LLM (free tier) | https://console.groq.com → API Keys |
-| **OpenCode Zen** *(optional, recommended)* | LLM via your subscription — `deepseek-v4-flash` models | https://opencode.ai/auth → copy API key |
-| **OpenRouter** *(optional)* | LLM fallback | https://openrouter.ai → Keys |
+| **OpenRouter** *(optional)* | LLM fallback / free embeddings | https://openrouter.ai → Keys |
 | **Supabase** *(optional)* | persistence + realtime EHR sync | https://supabase.com → run `server/supabase/schema.sql` |
+| **LiveKit Cloud** *(legacy path only)* | old realtime voice transport | https://cloud.livekit.io → Project Settings → Keys (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`) |
 
-No signup needed for **Whisper** (STT), **Piper/Kokoro** (TTS) — models auto-download on first run.
+No signup needed for **Whisper** (STT), **Piper/Kokoro** (TTS) — the native
+library and models auto-download on first run (voice_forge agent) or are
+fetched by `server/scripts` (Python path).
 **RAG embeddings** use OpenRouter's free `nvidia/nemotron-3-embed-1b` when `OPENROUTER_API_KEY` is set (no extra cost); the knowledge base itself is MedQuAD (CC BY 4.0) + curated ClinicGuard snippets.
 
 ### 2. Run the backend
@@ -128,12 +151,15 @@ No signup needed for **Whisper** (STT), **Piper/Kokoro** (TTS) — models auto-d
 
 ```bash
 cd voice_forge
-./scripts/fetch_native.sh && ./scripts/fetch_models.sh   # once: sherpa lib + models
+# Optional: pre-fetch the sherpa native library + models.
+# Skip this — the agent auto-downloads both on first run
+# (cache: ~/.cache/voice_forge/native/).
+# ./scripts/fetch_native.sh && ./scripts/fetch_models.sh
 cd examples/clinicguard_agent
 dart run bin/agent.dart &        # 1) voice triage agent (ws://:8765/signal)
 
 cd ../../server
-cp .env.example .env             # fill in the Groq key (or set GROQ_API_KEY in env)
+cp .env.example .env             # fill in a Groq key (or set GROQ_API_KEY in env)
 uv sync
 uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000   # 2) control plane
 ```
@@ -192,6 +218,11 @@ uv run python agent.py console
 # app: the repo's tests
 flutter test
 flutter analyze
+
+# voice_forge framework (see voice_forge/README.md for the full gate list)
+cd voice_forge/packages/voice_forge && dart test && dart analyze
+cd ../voice_forge_flutter && flutter test && flutter analyze
+cd ../../examples/poc_server && dart run bin/self_test.dart      # WebRTC loopback -> RESULT: PASS
 ```
 
 ## 🔒 Security notes
@@ -205,7 +236,11 @@ flutter analyze
 
 ## 🧩 Acknowledgements
 
-- [voice_forge](voice_forge/) — our 100% Dart agent framework (webrtc_dart, sherpa-onnx, opus_codec_dart, flutter_webrtc)
+- [voice_forge](voice_forge/) — our 100% Dart agent framework, published on
+  pub.dev: [voice_forge](https://pub.dev/packages/voice_forge) ·
+  [voice_forge_flutter](https://pub.dev/packages/voice_forge_flutter) ·
+  [voice_forge_speech](https://pub.dev/packages/voice_forge_speech)
+  (webrtc_dart, sherpa-onnx, opus_codec_dart, flutter_webrtc)
 - [LiveKit Agents](https://github.com/livekit/agents) — legacy voice pipeline framework
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) · [faster-whisper](https://github.com/SYSTRAN/faster-whisper) · [piper-tts](https://github.com/rhasspy/piper) · [Kokoro-82M](https://github.com/hexgrad/kokoro) · [pydantic-ai](https://github.com/pydantic/pydantic-ai)
 - [OpenCode Zen](https://opencode.ai) — LLM gateway
