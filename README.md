@@ -6,7 +6,7 @@
 Flutter client (iOS · Android · Web · macOS) + Python voice agent — built entirely on free tiers.
 
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)
-![Dart](https://img.shields.io/badge/Dart-voicepipe-0175C2?logo=dart)
+![Dart](https://img.shields.io/badge/Dart-voice_forge-0175C2?logo=dart)
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python)
 ![LiveKit](https://img.shields.io/badge/LiveKit-Agents-00B8A9)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -24,12 +24,12 @@ summary card** — all with instant **barge-in** (talk over the agent to interru
 
 The full voice pipeline runs on **free tiers and local models** — no per-call cost.
 
-> **LiveKit-free (default):** the app now talks to **voicepipe** — a 100% Dart
-> voice-agent framework in this repo (`voicepipe/`) that replaces LiveKit
+> **LiveKit-free (default):** the app now talks to **voice_forge** — a 100% Dart
+> voice-agent framework in this repo (`voice_forge/`) that replaces LiveKit
 > Cloud + `livekit.agents`. No accounts, no tokens: a single Dart binary runs
 > the whole agent (webrtc_dart + sherpa-onnx VAD/STT/TTS) in ~90 MB RAM.
 > The Python backend remains the control plane (patients, summaries, Supabase).
-> The legacy LiveKit path still works; see [voicepipe/README.md](voicepipe/README.md).
+> The legacy LiveKit path still works; see [voice_forge/README.md](voice_forge/README.md).
 
 ## 🧠 Features
 
@@ -37,7 +37,7 @@ The full voice pipeline runs on **free tiers and local models** — no per-call 
   over the agent it interrupts in ~2 ms (verified end-to-end). A pure-Dart
   energy VAD (`app/lib/vad/`) remains for local ducking experiments.
 - **Local STT** — sherpa-onnx Whisper (multilingual, auto-detects en/hi) on the
-  voicepipe agent; the Python path uses a custom `faster-whisper` plugin.
+  voice_forge agent; the Python path uses a custom `faster-whisper` plugin.
 - **Local TTS** — sherpa-onnx Piper (en + hi voices); the Python path adds
   optional **Kokoro-82M ONNX**.
 - **Multiple LLM providers** — Groq, OpenRouter, or **OpenCode Zen** (OpenAI-compatible),
@@ -53,8 +53,8 @@ The full voice pipeline runs on **free tiers and local models** — no per-call 
 **LiveKit-free path (default):**
 
 ```
-Flutter app (iOS/Android/web/macOS)          [voicepipe_flutter package]
-│  mic → WebRTC (flutter_webrtc) ──ws /signal──►  voicepipe Dart agent
+Flutter app (iOS/Android/web/macOS)          [voice_forge_flutter package]
+│  mic → WebRTC (flutter_webrtc) ──ws /signal──►  voice_forge Dart agent
 │  data channel "agent.events" ◄──────────────┤  webrtc_dart (SFU-free P2P)
 │  (user_transcript / assistant_text /         │  Opus → Silero VAD → Whisper STT
 │   agent_state / summary / barge_in)          │  → Groq/OpenAI LLM → Piper TTS
@@ -89,9 +89,9 @@ server/   Python backend (control plane + legacy LiveKit agent)
   rag_data/               curated ClinicGuard snippets + downloaded MedQuAD (gitignored)
   api/main.py             FastAPI: /token, /patients, /sessions/{id}/summary, /transcripts, /rag/{status,search,ingest}
   supabase/schema.sql     tables + RLS policies
-voicepipe/  100% Dart voice-agent framework (LiveKit-free, see voicepipe/README.md)
-  packages/voicepipe            transport + speech (sherpa-onnx) + LLM + session loop
-  packages/voicepipe_flutter    VoiceCallController (flutter_webrtc client)
+voice_forge/  100% Dart voice-agent framework (LiveKit-free, see voice_forge/README.md)
+  packages/voice_forge            transport + speech (sherpa-onnx) + LLM + session loop
+  packages/voice_forge_flutter    VoiceCallController (flutter_webrtc client)
   examples/clinicguard_agent    THIS project's triage agent (greeting, summary, EHR bridge)
   examples/poc_server|client    transport + agent POCs with self-tests
 app/      Flutter client (iOS, Android, Web, macOS)
@@ -127,7 +127,7 @@ No signup needed for **Whisper** (STT), **Piper/Kokoro** (TTS) — models auto-d
 **LiveKit-free path (recommended):**
 
 ```bash
-cd voicepipe
+cd voice_forge
 ./scripts/fetch_native.sh && ./scripts/fetch_models.sh   # once: sherpa lib + models
 cd examples/clinicguard_agent
 dart run bin/agent.dart &        # 1) voice triage agent (ws://:8765/signal)
@@ -153,13 +153,13 @@ uv run uvicorn api.main:app --reload --host 0.0.0.0 --port 8000   # 3) control p
 |---|---|---|
 | **Web** | `flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000` | localhost works with mic; CORS enabled |
 | **macOS** | `flutter run -d macos --dart-define=API_BASE_URL=http://127.0.0.1:8000` | entitlements pre-configured |
-| **iOS** | `flutter run --dart-define=API_BASE_URL=http://<mac-lan-ip>:8000 --dart-define=VOICEPIPE_SIGNALING_URL=ws://<mac-lan-ip>:8765/signal` | physical iPhone (simulator has no mic) |
+| **iOS** | `flutter run --dart-define=API_BASE_URL=http://<mac-lan-ip>:8000 --dart-define=VOICE_FORGE_SIGNALING_URL=ws://<mac-lan-ip>:8765/signal` | physical iPhone (simulator has no mic) |
 | **Android** | same as iOS | RECORD_AUDIO permission auto-added |
 
-The voicepipe agent endpoint defaults to `ws://127.0.0.1:8765/signal`; point
-`VOICEPIPE_SIGNALING_URL` at your machine's LAN IP when running on a phone.
+The voice_forge agent endpoint defaults to `ws://127.0.0.1:8765/signal`; point
+`VOICE_FORGE_SIGNALING_URL` at your machine's LAN IP when running on a phone.
 Running the app on a phone not on the same Wi-Fi? See `docs/tunneling.md`
-(tunnel the voicepipe `/signal` WS + the FastAPI `/summary` endpoint).
+(tunnel the voice_forge `/signal` WS + the FastAPI `/summary` endpoint).
 
 ### 4. Run the demo
 
@@ -197,7 +197,7 @@ flutter analyze
 ## 🔒 Security notes
 
 - This is a **demo**, not HIPAA-compliant. Use fake patient data only.
-- The voicepipe `/signal` WebSocket and FastAPI `/token`/`/summary` endpoints
+- The voice_forge `/signal` WebSocket and FastAPI `/token`/`/summary` endpoints
   are intentionally unauthenticated for the demo — add a Supabase JWT check
   before any production use (`docs/tunneling.md` covers this).
 - `server/.env` and `server/models/` are gitignored — never commit keys or weights.
@@ -205,7 +205,7 @@ flutter analyze
 
 ## 🧩 Acknowledgements
 
-- [voicepipe](voicepipe/) — our 100% Dart agent framework (webrtc_dart, sherpa-onnx, opus_codec_dart, flutter_webrtc)
+- [voice_forge](voice_forge/) — our 100% Dart agent framework (webrtc_dart, sherpa-onnx, opus_codec_dart, flutter_webrtc)
 - [LiveKit Agents](https://github.com/livekit/agents) — legacy voice pipeline framework
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) · [faster-whisper](https://github.com/SYSTRAN/faster-whisper) · [piper-tts](https://github.com/rhasspy/piper) · [Kokoro-82M](https://github.com/hexgrad/kokoro) · [pydantic-ai](https://github.com/pydantic/pydantic-ai)
 - [OpenCode Zen](https://opencode.ai) — LLM gateway

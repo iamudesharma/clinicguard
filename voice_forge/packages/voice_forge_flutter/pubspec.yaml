@@ -1,0 +1,27 @@
+name: voice_forge_flutter
+description: >-
+  Flutter client for voice_forge: WebRTC voice calls with flutter_webrtc,
+  WebSocket signaling, the agent.events data-channel contract, and barge-in.
+version: 0.1.0
+repository: https://github.com/iamudesharma/clinicguard
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_webrtc: ^1.6.0
+  web_socket_channel: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+topics:
+  - voice
+  - webrtc
+  - speech
+  - audio

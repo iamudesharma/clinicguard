@@ -34,4 +34,4 @@ No pytest, no linter, no formatter. Verify changes with:
 
 ## Data channel
 
-Server publishes on topic `agent.events`: `user_transcript`, `assistant_text`, `agent_state`, `summary`, `summary_error` (agent.py:203-309). Client sends `{"event":"barge_in"}` (agent.py:240). Keep in sync with `app/lib/state/call_state.dart` and voicepipe — see the `data-channel-contract` skill.
+Server publishes on topic `agent.events`: `user_transcript`, `assistant_text`, `agent_state`, `summary`, `summary_error` (agent.py:203-309). Client sends `{"event":"barge_in"}` (agent.py:240). Keep in sync with `app/lib/state/call_state.dart` and voice_forge — see the `data-channel-contract` skill.

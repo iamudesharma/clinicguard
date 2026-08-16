@@ -1,0 +1,14 @@
+# Models + native libraries are downloaded, not committed
+models/
+third_party/native/
+
+# Dart/Flutter
+.dart_tool/
+build/
+*.iml
+.DS_Store
+
+# Internal sherpa-sync tooling — never pushed
+patches/
+scripts/sherpa_sync.py
+UPSTREAM_SYNC.md
