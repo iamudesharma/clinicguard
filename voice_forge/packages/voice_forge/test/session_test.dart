@@ -44,7 +44,7 @@ class _FakeStt implements VoicepipeSTT {
 class _FakeTts implements VoicepipeTTS {
   final List<String> spoken = [];
   @override
-  TtsAudio synthesize(String text) {
+  Future<TtsAudio> synthesize(String text) async {
     spoken.add(text);
     // 0.2s of audio at 16k (would become a few 20ms frames after upsampling)
     return TtsAudio(samples: Float32List(3200), sampleRate: 16000);
@@ -66,7 +66,7 @@ class _FakeLlm implements VoicepipeLlm {
   ]);
 
   @override
-  Future<String> reply(List<ChatMessage> history) async {
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async {
     seen.addAll(history);
     if (gate != null) await gate!.future;
     return replyText;
@@ -76,6 +76,7 @@ class _FakeLlm implements VoicepipeLlm {
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
   }) async {
     seen.addAll(history);
     if (gate != null) await gate!.future;
@@ -85,6 +86,27 @@ class _FakeLlm implements VoicepipeLlm {
       return LlmReply(toolCalls: toolCalls);
     }
     return LlmReply(content: replyText);
+  }
+
+  @override
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
+  }) async {
+    seen.addAll(history);
+    if (gate != null) await gate!.future;
+    if (rejectTools) throw LlmException('400: tools not supported');
+    if (!_toolCallsFired && toolCalls.isNotEmpty) {
+      _toolCallsFired = true; // only fire once, then reply normally
+      return LlmReply(toolCalls: toolCalls);
+    }
+    final reply = LlmReply(content: replyText);
+    if (reply.content != null && onPartial != null) {
+      onPartial(reply.content!);
+    }
+    return reply;
   }
 }
 

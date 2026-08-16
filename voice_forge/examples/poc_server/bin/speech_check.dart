@@ -73,21 +73,21 @@ Future<void> main() async {
     offset += take;
     final seg = vad.accept(frame);
     if (seg != null) {
-      final text = stt.transcribe(seg);
+      final text = await stt.transcribe(seg);
       segments.add(text);
       print('  segment: "$text"');
     }
   }
   final tail = vad.flush();
   if (tail != null) {
-    final text = stt.transcribe(tail);
+    final text = await stt.transcribe(tail);
     segments.add(text);
     print('  segment: "$text"');
   }
   print('STT: ${segments.length} segments in ${ssw.elapsed.inSeconds}s');
 
   // --- TTS ----------------------------------------------------------------
-  final audio = tts.synthesize('Hello, I am your voice_forge agent.');
+  final audio = await tts.synthesize('Hello, I am your voice_forge agent.');
   final rms = audio.samples.isEmpty
       ? 0.0
       : sqrt(audio.samples.map((s) => s * s).reduce((a, b) => a + b) /

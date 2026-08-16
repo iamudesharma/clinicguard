@@ -9,7 +9,7 @@ procedure.
 | Package | Version | URL |
 |---------|---------|-----|
 | voice_forge_speech | 1.13.5 | https://pub.dev/packages/voice_forge_speech |
-| voice_forge | 0.2.0 | https://pub.dev/packages/voice_forge |
+| voice_forge | 0.3.0 | https://pub.dev/packages/voice_forge |
 | voice_forge_flutter | 0.1.0 | https://pub.dev/packages/voice_forge_flutter |
 
 Publish order: `voice_forge_speech` → `voice_forge` → `voice_forge_flutter`.
@@ -19,7 +19,7 @@ Publish order: `voice_forge_speech` → `voice_forge` → `voice_forge_flutter`.
 | # | Package | Version | Type | Purpose | Dependencies | Tests | License |
 |---|---------|---------|------|---------|--------------|-------|---------|
 | 1 | `voice_forge_speech` | 1.13.5 | Dart (pure) | Vendored, Flutter/web-free FFI bindings for sherpa-onnx (k2-fsa): Silero VAD, Whisper ASR, Piper TTS, speaker ID, denoising, WAV I/O. Host injects the native library handle. | `ffi` | — (upstream examples) | Apache-2.0 (Xiaomi Corp.) |
-| 2 | `voice_forge` | 0.2.0 | Dart (pure) | Server-side voice-agent framework: WebRTC transport (`VoiceCallServer`, `PeerSession`, `audio_core`), signaling, speech interfaces + sherpa implementations (`SherpaKit`), LLM layer (`OpenAiCompatibleLlm`, `FallbackLlm`, `EchoLlm`, tool calling), conversation loop (`AgentSession`). | `http`, `opus_codec_dart`, `shelf`, `shelf_web_socket`, `voice_forge_speech`, `web_socket_channel`, `webrtc_dart` | 37 unit tests (`dart test`) | MIT |
+| 2 | `voice_forge` | 0.3.0 | Dart (pure) | Server-side voice-agent framework: WebRTC transport (`VoiceCallServer`, `PeerSession`, `audio_core`), signaling, speech interfaces + sherpa implementations (`SherpaKit`, worker-isolate STT/TTS), LLM layer (`OpenAiCompatibleLlm`, `FallbackLlm`, `EchoLlm`, SSE streaming + tool calling), conversation loop (`AgentSession`, sentence-incremental TTS). | `http`, `opus_codec_dart`, `shelf`, `shelf_web_socket`, `voice_forge_speech`, `web_socket_channel`, `webrtc_dart` | 44 unit tests (`dart test`) | MIT |
 | 3 | `voice_forge_flutter` | 0.1.0 | Flutter (pure) | Client for voice_forge agents: `VoiceCallController` — mic → WebRTC → agent, `agent.events` data channel, playback, barge-in, RTT pings. | `flutter_webrtc`, `web_socket_channel` | 2 tests (`flutter test`) | MIT |
 
 Not published: `examples/` (`poc_server`, `poc_client`, `clinicguard_agent`) and

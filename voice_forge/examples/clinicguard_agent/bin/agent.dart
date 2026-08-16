@@ -102,6 +102,7 @@ class TriageCore implements AudioCore {
   final String apiBase;
   final int ragTopK;
   final int ragMaxContextChars;
+  final TtsAudio? cachedGreeting;
   final http.Client _http = http.Client();
   // Dedicated client for RAG retrieval + tools: the 900ms retrieval budget
   // abandons in-flight requests, and an abandoned request on a shared client
@@ -122,6 +123,7 @@ class TriageCore implements AudioCore {
     required this.apiBase,
     this.ragTopK = 3,
     this.ragMaxContextChars = 2400,
+    this.cachedGreeting,
   }) {
     session.configure(
       tools: _tools,
@@ -139,6 +141,17 @@ class TriageCore implements AudioCore {
       if (p['type'] == 'user_transcript') {
         _lastUserTurnAt = DateTime.now();
       }
+      if (p['type'] == 'agent_state' && p['state'] == 'thinking') {
+        _thinkingAt = DateTime.now();
+      }
+      if (p['type'] == 'agent_state' &&
+          p['state'] == 'speaking' &&
+          _thinkingAt != null) {
+        final ms = DateTime.now().difference(_thinkingAt!).inMilliseconds;
+        safeLog('[$roomId] THINK->SPEAK: $ms ms '
+            '(STT+RAG+LLM first token + first sentence TTS)');
+        _thinkingAt = null;
+      }
       if (p['type'] == 'assistant_text' && _lastUserTurnAt != null) {
         final ms = DateTime.now().difference(_lastUserTurnAt!).inMilliseconds;
         safeLog('[$roomId] TURN LATENCY: $ms ms '
@@ -153,6 +166,7 @@ class TriageCore implements AudioCore {
   }
 
   DateTime? _lastUserTurnAt;
+  DateTime? _thinkingAt;
 
   /// Tools offered to the LLM (OpenAI-style function calling).
   static const _tools = [
@@ -475,7 +489,10 @@ class TriageCore implements AudioCore {
         ? 'Namaste, welcome back $name. The clinic has your records. '
             'Please tell me what is bothering you today.'
         : _greeting;
-    await session.greet(greeting);
+    // The standard greeting was pre-synthesized at startup; the patient-name
+    // variant (unique per call) is synthesized on the fly.
+    await session.greet(greeting,
+        preSynthesized: greeting == _greeting ? cachedGreeting : null);
   }
 
   @override
@@ -639,10 +656,24 @@ Future<void> main() async {
   safeLog('LLM: ${llm is EchoLlm ? "EchoLlm (offline)" : "OpenAI-compatible"}'
       ' | control plane: $apiBase');
 
+  // STT/TTS run in a worker isolate so speech never blocks the LLM turn;
+  // VAD stays on the main isolate (cheap, and one stateful instance per call).
+  final speech = await kit.createWorkerSpeech();
+
+  // Pre-synthesize the standard greeting so the first call skips TTS.
+  TtsAudio? greetingAudio;
+  try {
+    greetingAudio = await speech.tts.synthesize(_greeting);
+    safeLog('greeting pre-synthesized '
+        '(${greetingAudio.samples.length} samples)');
+  } catch (e) {
+    safeLog('greeting pre-synthesis failed; will synthesize on the fly: $e');
+  }
+
   final agent = VoiceAgent(
     vadFactory: kit.createVad,
-    stt: kit.speech.stt,
-    tts: kit.speech.tts,
+    stt: speech.stt,
+    tts: speech.tts,
     llm: llm,
     systemPrompt: _systemPrompt,
   );
@@ -655,7 +686,11 @@ Future<void> main() async {
       final ragTopK = int.tryParse(env['RAG_TOP_K'] ?? '') ?? 3;
       final ragMax = int.tryParse(env['RAG_MAX_CONTEXT_CHARS'] ?? '') ?? 2400;
       final core = TriageCore(agent.createSession(),
-          roomId: roomId, apiBase: apiBase, ragTopK: ragTopK, ragMaxContextChars: ragMax);
+          roomId: roomId,
+          apiBase: apiBase,
+          ragTopK: ragTopK,
+          ragMaxContextChars: ragMax,
+          cachedGreeting: greetingAudio);
       return core;
     },
   );

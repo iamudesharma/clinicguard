@@ -72,13 +72,13 @@ class _StubVad implements VoicepipeVAD {
 
 class _StubStt implements VoicepipeSTT {
   @override
-  String transcribe(Float32List segment16k) =>
+  Future<String> transcribe(Float32List segment16k) async =>
       'My name is Priya, I am 30 years old, and I have had a fever and '
       'headache for two days.';
 }
 
 class _StubTts implements VoicepipeTTS {
   @override
-  TtsAudio synthesize(String text) =>
+  Future<TtsAudio> synthesize(String text) async =>
       TtsAudio(samples: Float32List(1600), sampleRate: 16000);
 }

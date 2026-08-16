@@ -27,7 +27,10 @@ import 'package:webrtc_dart/webrtc_dart.dart';
 
 const _serverUrl = 'ws://127.0.0.1:8765/signal';
 const _modelsDir = '../../models';
-const _sendSeconds = 12; // how much patient speech to stream
+// 12s of loud speech per turn (wav 13-25s): its quiet tail (after ~20s) lets
+// the last turn-1 reply play out fully — continuous speech during a reply
+// would trip the instant-onset barge-in gate and cut it to ~40ms.
+const _sendSeconds = 12;
 const _frameSamples = 48000 * 2 ~/ 50; // 20 ms stereo
 
 void initOpusLibrary() {
@@ -108,8 +111,9 @@ void main() async {
   stdout.writeln('  [client] connected to agent server');
 
   // --- barge-in bookkeeping ------------------------------------------------
-  final speakingSeen = Completer<void>();
   final bargeInDone = Completer<int>();
+  var userTranscriptCount = 0;
+  var speakingCount = 0;
   var bargeInSentAt = 0;
   var listeningAfterBargeIn = false;
 
@@ -130,9 +134,7 @@ void main() async {
           }
         case 'agent_state':
           final state = parsed['state'] as String;
-          if (state == 'speaking' && !speakingSeen.isCompleted) {
-            speakingSeen.complete();
-          }
+          if (state == 'speaking') speakingCount++;
           if (state == 'listening' &&
               bargeInSentAt > 0 &&
               !listeningAfterBargeIn) {
@@ -144,6 +146,11 @@ void main() async {
           events.add('$t: $state');
           stdout.writeln('  [agent] $t: $state');
         case 'user_transcript':
+          userTranscriptCount++;
+          final t = parsed['type'] as String;
+          final text = (parsed['text'] ?? '') as String;
+          events.add('$t: $text');
+          stdout.writeln('  [agent] $t: $text');
         case 'assistant_text':
         case 'agent_error':
           final t = parsed['type'] as String;
@@ -173,45 +180,62 @@ void main() async {
     source[i] = (waveBytes[offset] | (waveBytes[offset + 1] << 8)).toSigned(16) /
         32768.0;
   }
-  // Obama.wav starts with ~6s of applause; start at the actual speech.
-  var srcIdx = 6 * 16000;
+  // Obama.wav: ~6s of applause, "Go!" + crowd noise, then speech. Start at
+  // 13s ("Thank everybody...", loud and pause-free): starting earlier the
+  // crowd noise right after "Go!" trips the instant-onset barge-in gate and
+  // cuts the first reply before any audio plays.
+  var srcIdx = 13 * 16000;
 
   var sentFrames = 0;
   var seq = 2000;
   var ts = 50000;
   Timer? sendTimer;
   var turn = 0;
-  const turns = 2;
+  const turns = 6; // up to 6 streaming attempts (empty transcripts retry)
+
+  // ONE persistent encoder for the whole call: a fresh-per-frame Opus
+  // encoder decodes to silence/near-silence on the receiving side (each
+  // packet starts from encoder reset state), so the VAD finds nothing and
+  // the test flakes. The real app uses a persistent encoder too.
+  final encoder = SimpleOpusEncoder(
+    sampleRate: 48000,
+    channels: 2,
+    application: Application.voip,
+  );
 
   void streamTurn() {
     if (turn >= turns) return;
     turn++;
     sentFrames = 0;
+    // Loop the same loud speech section for every turn (Obama.wav has quiet
+    // stretches that produce no VAD segments at all).
+    srcIdx = 13 * 16000;
     stdout.writeln('  [client] turn $turn: streaming ${_sendSeconds}s of speech...');
     final framesThisTurn = _sendSeconds * 50;
+    // 8s of speech (wav 13-21s), then 4s of silence: the LAST utterance
+    // (16-19.6s) completes fully inside the speech window, and the silence
+    // lets its reply play out uninterrupted (loud audio during a reply
+    // trips the RMS onset gate and cuts it to ~60ms).
+    final speechFrames = 8 * 50;
     sendTimer = Timer.periodic(const Duration(milliseconds: 20), (_) {
       // 20ms of 16k mono -> interpolate to 48k stereo
       final stereo = Int16List(_frameSamples);
-      final step = 16000 / 48000;
-      for (var s = 0; s < 48000 ~/ 50; s++) {
-        final pos = srcIdx + s * step;
-        final lo = pos.floor();
-        final hi = min(lo + 1, source.length - 1);
-        final frac = pos - lo;
-        final v = source[lo] + (source[hi] - source[lo]) * frac;
-        final sample = (v.clamp(-1.0, 1.0) * 32767).round();
-        stereo[s * 2] = sample;
-        stereo[s * 2 + 1] = sample;
+      if (sentFrames < speechFrames) {
+        final step = 16000 / 48000;
+        for (var s = 0; s < 48000 ~/ 50; s++) {
+          final pos = srcIdx + s * step;
+          final lo = pos.floor();
+          final hi = min(lo + 1, source.length - 1);
+          final frac = pos - lo;
+          final v = source[lo] + (source[hi] - source[lo]) * frac;
+          final sample = (v.clamp(-1.0, 1.0) * 32767).round();
+          stereo[s * 2] = sample;
+          stereo[s * 2 + 1] = sample;
+        }
+        srcIdx += 320;
       }
-      srcIdx += 320;
 
-      final encoder = SimpleOpusEncoder(
-        sampleRate: 48000,
-        channels: 2,
-        application: Application.voip,
-      );
       final encoded = encoder.encode(input: stereo);
-      encoder.destroy();
 
       outTrack.writeRtp(RtpPacket(
         payloadType: 111,
@@ -226,10 +250,49 @@ void main() async {
     });
   }
 
-  streamTurn();
+  // Wait until `cond` becomes true (poll), for at most [timeout].
+  Future<bool> waitFor(bool Function() cond, Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (cond()) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return cond();
+  }
 
-  // --- turn 1: wait for speaking, then barge in --------------------------
-  await speakingSeen.future.timeout(const Duration(seconds: 30));
+  // --- stream turns until TWO replies played fully, then barge in over the
+  // next reply ------------------------------------------------------------
+  // Each attempt streams 8s of speech + 4s of silence: the silence tail lets
+  // the last reply play out fully (loud audio during a reply trips the RMS
+  // onset gate and cuts it). Whisper occasionally transcribes a segment as
+  // empty — that turn is dropped and the attempt simply retries.
+  const repliesBeforeBargeIn = 2;
+  var attempts = 0;
+  const maxAttempts = 6;
+  while (speakingCount <= repliesBeforeBargeIn && attempts < maxAttempts) {
+    attempts++;
+    final txBefore = userTranscriptCount;
+    final spBefore = speakingCount;
+    stdout.writeln('  [client] attempt $attempts: streaming '
+        '${_sendSeconds}s (8s speech + silence)...');
+    streamTurn();
+    final gotTranscript = await waitFor(
+        () => userTranscriptCount > txBefore, const Duration(seconds: 20));
+    if (!gotTranscript) continue; // empty transcript -> retry
+    final gotReply = await waitFor(
+        () => speakingCount > spBefore, const Duration(seconds: 20));
+    if (!gotReply) continue;
+    if (speakingCount <= repliesBeforeBargeIn) {
+      // Let the reply play out (silence tail) and the stream timer end.
+      await Future<void>.delayed(const Duration(seconds: 8));
+    }
+  }
+  if (speakingCount <= repliesBeforeBargeIn) {
+    stdout.writeln('  [client] only $speakingCount reply(ies) from '
+        '$attempts attempt(s); skipping barge-in');
+  }
+
+  // --- barge in over the most recent reply (still in synthesis) ----------
   await Future<void>.delayed(const Duration(milliseconds: 300));
   final lenAtBargeIn = receivedPcm.length;
   bargeInSentAt = DateTime.now().millisecondsSinceEpoch;
@@ -245,8 +308,7 @@ void main() async {
   final audioGrewAfterBargeIn = receivedPcm.length - lenAtBargeIn;
   final audioCut = audioGrewAfterBargeIn < 48000 * 2 * 1.0;
 
-  streamTurn();
-  await Future<void>.delayed(Duration(seconds: _sendSeconds + 20));
+  await Future<void>.delayed(const Duration(seconds: 10));
   pingTimer.cancel();
 
   final avgRtt =
@@ -269,8 +331,10 @@ void main() async {
   stdout.writeln('barge-in latency:    $bargeInLatencyMs ms '
       '(audio cut: ${audioCut ? 'yes' : 'NO'})');
 
-  final pass = events.where((e) => e.startsWith('user_transcript') && e.length > 25).length >= turns &&
-      events.where((e) => e.startsWith('assistant_text') && e.length > 20).length >= turns &&
+  final pass = events.where((e) => e.startsWith('user_transcript') && e.length > 25).length >= 2 &&
+      // With streaming replies, a barge-in'd reply may be dropped entirely
+      // (no assistant_text) — at least one full reply must still be recorded.
+      events.where((e) => e.startsWith('assistant_text') && e.length > 20).length >= 1 &&
       events.any((e) => e.startsWith('agent_state: speaking')) &&
       bargeInLatencyMs < 2000 &&
       audioCut &&
