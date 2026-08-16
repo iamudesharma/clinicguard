@@ -5,7 +5,7 @@ description: >-
   build of the official sherpa_onnx Dart package (Apache-2.0) with a small
   patch that lets the host process inject the loaded native library.
 version: 1.13.5
-repository: https://github.com/example/voice_forge # TODO: set real repo
+repository: https://github.com/iamudesharma/clinicguard
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

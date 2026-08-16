@@ -630,7 +630,7 @@ Future<void> main() async {
   final apiBase = env['API_BASE_URL'] ?? _defaultApiBase;
   safeLog('loading sherpa-onnx (whisper=$whisperModel) ...');
   final sw = Stopwatch()..start();
-  final kit = SherpaKit.load(
+  final kit = await SherpaKit.load(
     models: SherpaModels.fromModelsDir(_modelsDir, whisperPrefix: whisperModel),
   );
   safeLog('sherpa-onnx ready in ${sw.elapsed.inSeconds}s');

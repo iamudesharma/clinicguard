@@ -96,7 +96,7 @@ Future<void> main() async {
   stdout.writeln('loading sherpa-onnx + models from $_modelsDir '
       '(whisper=$whisperModel) ...');
   final sw = Stopwatch()..start();
-  final kit = SherpaKit.load(
+  final kit = await SherpaKit.load(
     models: SherpaModels.fromModelsDir(_modelsDir,
         whisperPrefix: whisperModel),
   );

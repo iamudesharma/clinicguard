@@ -1,8 +1,9 @@
 /// sherpa-onnx speech implementations of the voice_forge interfaces.
 ///
-/// The native `libsherpa-onnx-c-api` library must be loadable by the host
-/// process (see `scripts/fetch_native.sh`); [SherpaKit.loadNative] resolves
-/// and injects it.
+/// The native `libsherpa-onnx-c-api` library is loaded by the host process.
+/// On first run it is downloaded automatically from the official sherpa-onnx
+/// releases into a user cache (see `native_download.dart`); set
+/// `autoDownload: false` on [SherpaKit.load] to manage it manually.
 library;
 
 import 'dart:ffi';
@@ -12,16 +13,24 @@ import 'dart:typed_data';
 import 'package:voice_forge_speech/voice_forge_speech.dart' as sherpa;
 
 import 'interfaces.dart';
+import 'native_download.dart';
 
 /// Locate + load the sherpa-onnx native library.
-DynamicLibrary loadSherpaLibrary() {
+///
+/// Probes the usual places first (repo layout, current directory, system
+/// search path, cache); if none exist and [autoDownload] is set, downloads
+/// the prebuilt library from the official sherpa-onnx release into the user
+/// cache (~/.cache/voice_forge/native, or `VOICE_FORGE_NATIVE_DIR`).
+Future<DynamicLibrary> loadSherpaLibrary({bool autoDownload = true}) async {
   final os = Platform.operatingSystem;
   final arch = Platform.version.contains('arm64') ? 'arm64' : 'x86_64';
   final dylib =
       os == 'macos' ? 'libsherpa-onnx-c-api.dylib' : 'libsherpa-onnx-c-api.so';
+  final cacheDir = nativeCacheDir();
   final candidates = <String>[
     'third_party/native/$os-$arch/$dylib',
     '${Directory.current.path}/../../third_party/native/$os-$arch/$dylib',
+    '$cacheDir/$dylib',
     dylib,
     'sherpa-onnx-c-api.dll',
   ];
@@ -30,9 +39,41 @@ DynamicLibrary loadSherpaLibrary() {
       return DynamicLibrary.open(path);
     } catch (_) {}
   }
+  if (autoDownload) {
+    final libPath = await downloadNativeLibrary(cacheDir);
+    return DynamicLibrary.open(libPath);
+  }
   throw StateError(
-    'libsherpa-onnx-c-api not found. Run scripts/fetch_native.sh first.',
+    'libsherpa-onnx-c-api not found. Either re-enable auto-download or '
+    'download the prebuilt library from the official sherpa-onnx releases '
+    'and place it in the current directory or on the system library search '
+    'path (see the voice_forge_speech README).',
   );
+}
+
+/// Fetches the standard speech models into [models]' directories when the
+/// expected files are missing (silero VAD, whisper encoder/decoder + tokens,
+/// piper en_US-lessac-medium int8). Model URLs come from the official
+/// sherpa-onnx releases.
+Future<void> ensureModels(SherpaModels models) async {
+  const asrBase = 'https://github.com/k2-fsa/sherpa-onnx/releases/download';
+  if (!File(models.sileroVad).existsSync()) {
+    await downloadFile('$asrBase/asr-models/silero_vad.onnx', models.sileroVad);
+  }
+  if (!Directory(models.whisperDir).existsSync()) {
+    final parent = File(models.whisperDir).parent.path;
+    await extractTarball(
+      '$asrBase/asr-models/sherpa-onnx-whisper-${models.whisperPrefix}.tar.bz2',
+      parent,
+    );
+  }
+  if (!Directory(models.piperDir).existsSync()) {
+    final parent = File(models.piperDir).parent.path;
+    await extractTarball(
+      '$asrBase/tts-models/vits-piper-en_US-lessac-medium-int8.tar.bz2',
+      parent,
+    );
+  }
 }
 
 /// Model paths for the sherpa speech stack (whisper encoder/decoder + piper).
@@ -72,17 +113,27 @@ class SherpaKit {
 
   static bool _bound = false;
 
-  static void loadNative() {
+  /// Ensures the native library is loaded (downloading it on first run when
+  /// [autoDownload] is enabled) and initializes the bindings.
+  static Future<void> loadNative({bool autoDownload = true}) async {
     if (_bound) return;
-    final lib = loadSherpaLibrary(); // ensure the dylib is in the process
+    final lib = await loadSherpaLibrary(autoDownload: autoDownload);
     sherpa.setSherpaLibrary(lib); // vendored patch: inject the handle
     sherpa.initBindings();
     _bound = true;
   }
 
-  /// Loads bindings + all models. [models] selects the whisper prefix.
-  factory SherpaKit.load({required SherpaModels models}) {
-    loadNative();
+  /// Loads bindings + all models (downloading the native library and any
+  /// missing standard models on first run unless [autoDownload] is false).
+  /// [models] selects the whisper prefix.
+  static Future<SherpaKit> load({
+    required SherpaModels models,
+    bool autoDownload = true,
+  }) async {
+    await loadNative(autoDownload: autoDownload);
+    if (autoDownload) {
+      await ensureModels(models);
+    }
     final kit = SherpaKit._().._models = models;
 
     kit._recognizer = sherpa.OfflineRecognizer(

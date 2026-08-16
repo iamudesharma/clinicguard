@@ -22,14 +22,14 @@ void initOpusLibrary() {
   }
 }
 
-void main() {
+Future<void> main() async {
   initOpusLibrary();
 
   const modelsDir = '../../models';
   final whisperModel = Platform.environment['VOICE_FORGE_WHISPER_MODEL'] ?? 'tiny';
 
   final sw = Stopwatch()..start();
-  final kit = SherpaKit.load(
+  final kit = await SherpaKit.load(
     models: SherpaModels.fromModelsDir(modelsDir, whisperPrefix: whisperModel),
   );
   final vad = kit.createVad();

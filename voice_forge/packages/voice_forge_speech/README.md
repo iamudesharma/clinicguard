@@ -5,7 +5,7 @@ Pure-Dart FFI bindings for [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
 
 This is a Flutter-free, web-free build of the official `sherpa_onnx` Dart
 bindings (v1.13.5, Apache-2.0) with one small patch. It is used by
-[voice_forge](https://github.com/example/voice_forge) for VAD, speech-to-text,
+[voice_forge](https://github.com/iamudesharma/clinicguard) for VAD, speech-to-text,
 and text-to-speech in a pure-Dart voice agent.
 
 ## What you get
@@ -52,9 +52,28 @@ encouraged so this fork can shrink over time.
 
 ## Getting started
 
-1. Get the native library. From the voice_forge repo:
-   `./scripts/fetch_native.sh` downloads `libsherpa-onnx-c-api` for your OS/arch.
-   (Any other copy of the library works too — pass its path to `initBindings`.)
+> Using the [voice_forge](https://github.com/iamudesharma/clinicguard) framework?
+> `SherpaKit.load()` downloads this library automatically on first run —
+> nothing below is needed.
+
+1. **Get the native library** — this package has no bundled natives; the
+   host process must be able to load `libsherpa-onnx-c-api`. Download the
+   prebuilt library from the official sherpa-onnx releases
+   (https://github.com/k2-fsa/sherpa-onnx/releases):
+
+   | Platform | Asset (v1.13.5) |
+   | -------- | ---------------- |
+   | macOS arm64 | `sherpa-onnx-v1.13.5-osx-arm64-shared.tar.bz2` |
+   | macOS x64 | `sherpa-onnx-v1.13.5-osx-x64-shared.tar.bz2` |
+   | Linux x64 | `sherpa-onnx-v1.13.5-linux-x64-shared.tar.bz2` |
+   | Windows / others | see the release page for `*-shared` builds |
+
+   Each archive contains `lib/libsherpa-onnx-c-api.dylib` (macOS),
+   `lib/libsherpa-onnx-c-api.so` (Linux) or `bin/sherpa-onnx-c-api.dll`
+   (Windows), plus the `libonnxruntime` it links against. Place both next to
+   your binary (the current working directory), on the system library search
+   path, or pass the directory to `initBindings(...)`.
+
 2. Add the dependency:
 
 ```yaml
@@ -77,7 +96,8 @@ Note: `initBindings()` must be called **in every isolate** that uses
 sherpa-onnx APIs — each isolate has its own FFI binding state.
 
 For concrete end-to-end usage see the `dart-api-examples/` folder in the
-upstream repository.
+upstream repository. For a complete voice-agent built on this package, see
+the [voice_forge](https://github.com/iamudesharma/clinicguard) project.
 
 ## License
 

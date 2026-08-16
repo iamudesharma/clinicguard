@@ -2,7 +2,17 @@
 
 Everything needed to publish the three Dart/Flutter packages to pub.dev:
 inventory, setup, run, utilization, compliance state, and the exact release
-procedure. **Nothing on this page has been uploaded** — `--dry-run` only.
+procedure.
+
+## Published (2026-08-16)
+
+| Package | Version | URL |
+|---------|---------|-----|
+| voice_forge_speech | 1.13.5 | https://pub.dev/packages/voice_forge_speech |
+| voice_forge | 0.2.0 | https://pub.dev/packages/voice_forge |
+| voice_forge_flutter | 0.1.0 | https://pub.dev/packages/voice_forge_flutter |
+
+Publish order: `voice_forge_speech` → `voice_forge` → `voice_forge_flutter`.
 
 ## Packages
 
@@ -178,33 +188,13 @@ void main() {
       `flutter pub publish --dry-run` (voice_forge_flutter) all pass
       — zero errors, only the expected pre-commit warnings
 
-### Remaining before the real publish
+### Remaining for future releases
 
-- [ ] **Set the real repo URL**: both `voice_forge` pubspecs still carry
-      `repository: https://github.com/example/voice_forge # TODO: set real repo`.
-      Replace with the actual repository before publishing (pub.dev links it
-      on the package page).
-- [ ] **Check name availability**: `voice_forge_speech`, `voice_forge`,
-      `voice_forge_flutter` — the dry-run does NOT reserve or check names;
-      only the real publish does. If taken, bump names in all pubspecs +
-      imports.
-- [ ] **Drop the temporary `dependency_overrides`** (3 files:
-      `packages/voice_forge/pubspec.yaml`, `examples/poc_server/pubspec.yaml`,
-      `examples/clinicguard_agent/pubspec.yaml`). They exist only until
-      `voice_forge_speech` is live on pub.dev; the dry-run reports them as a
-      hint. Note the override must stay in the *examples* until they no
-      longer need it locally — they are not published, so it is harmless
-      there.
-- [ ] **Commit first**: publish from a clean git state (the dry-runs warn
-      about uncommitted changes). This repo's first commit must exclude
-      `server/.env`, `server/models/`, `models/`, `third_party/native/`
-      (already gitignored).
-- [ ] **Version bumps**: keep semantic versions aligned — if you change any
-      package, bump its version + CHANGELOG entry (and dependent packages if
-      the API changed). Changelog dates are optional.
-- [ ] Optional polish: package `example/` folders inside each package (pub.dev
-      scores examples), `homepage:` field, `funding:`/`issue_tracker:` if the
-      repo gains them.
+- [x] **Real repo URL set**: `repository: https://github.com/iamudesharma/clinicguard` in all three pubspecs.
+- [x] **Names claimed on pub.dev**: `voice_forge_speech`, `voice_forge`, `voice_forge_flutter` — live.
+- [x] **dependency_overrides dropped** from `packages/voice_forge/pubspec.yaml` (hosted `voice_forge_speech: ^1.13.5` resolves). The *examples* keep their local overrides — they are not published.
+- [ ] **Version bumps**: keep semantic versions aligned — bump version + CHANGELOG per release (and dependent packages if the API changed).
+- [ ] Optional polish: package `example/` folders inside each package (pub.dev scores examples), `homepage:` field, `funding:`/`issue_tracker:` if the repo gains them.
 
 ### Publish commands (NOT yet run — manual, in order)
 
@@ -228,13 +218,7 @@ the printed file list and version before confirming.
 
 ## Dry-run results (2026-08-16, re-run 2026-08-16 after the rename)
 
-| Package | Command | Result | Notes |
-|---------|---------|--------|-------|
-| voice_forge_speech | `dart pub publish --dry-run` | PASS (1 warning) | warning = uncommitted git changes only |
-| voice_forge | `dart pub publish --dry-run` | PASS (1 warning + 1 hint) | warning = uncommitted git changes; hint = temporary dependency_overrides |
-| voice_forge_flutter | `flutter pub publish --dry-run` | PASS (1 warning) | warning = uncommitted git changes |
-
-Name availability re-checked on pub.dev before the dry-runs: all three new
-names are free (404 = available). No uploads were performed. The pub.dev
-server may enforce additional checks at real publish time (name/version
-conflicts, email verification).
+All three packages were validated with `--dry-run` before their real
+publishes on 2026-08-16; each passed with zero errors (only uncommitted-git
+warnings, resolved by committing). All three were then published for real.
+Name availability was re-checked immediately before each publish.

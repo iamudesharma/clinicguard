@@ -5,7 +5,7 @@ transport, signaling, speech (sherpa-onnx: VAD/STT/TTS), an LLM interface,
 and the conversation loop — all pure Dart, no LiveKit, no Python.
 
 Runs as a single `dart compile exe` binary in ~90 MB RSS. The Flutter client
-package is [`voice_forge_flutter`](https://github.com/example/voice_forge).
+package is [`voice_forge_flutter`](https://github.com/iamudesharma/clinicguard).
 
 ## Features
 
@@ -28,14 +28,36 @@ package is [`voice_forge_flutter`](https://github.com/example/voice_forge).
 
 ## Getting started
 
-1. Download the native speech library and models (from the voice_forge repo):
+**No manual downloads needed.** The first time you create the speech kit,
+voice_forge fetches everything automatically:
 
-```bash
-./scripts/fetch_native.sh   # libsherpa-onnx-c-api (once)
-./scripts/fetch_models.sh   # silero VAD + whisper tiny + piper (once)
+1. the prebuilt `libsherpa-onnx-c-api` native library (from the official
+   sherpa-onnx releases) into a user cache
+   (`~/.cache/voice_forge/native/`, overridable via `VOICE_FORGE_NATIVE_DIR`);
+2. the standard speech models (`silero_vad.onnx`, Whisper tiny,
+   Piper en_US-lessac) into the models directory if they are missing.
+
+```dart
+final kit = await SherpaKit.load(
+  models: SherpaModels.fromModelsDir('models'), // created on first run
+);
 ```
 
-2. Add the dependency:
+Subsequent runs are instant (cached). To manage artifacts manually, call
+`SherpaKit.load(models: ..., autoDownload: false)` — then the assets must be
+provided by you:
+
+| Asset | Source |
+| ----- | ------ |
+| `libsherpa-onnx-c-api.dylib` / `.so` | `sherpa-onnx-v1.13.5-{osx-arm64,osx-x64,linux-x64}-shared.tar.bz2` from https://github.com/k2-fsa/sherpa-onnx/releases, next to your binary |
+| `silero_vad.onnx` | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx |
+| `sherpa-onnx-whisper-tiny/` (encoder/decoder int8 + tokens) | https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2 |
+| `vits-piper-en_US-lessac-medium-int8/` | https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium-int8.tar.bz2 |
+
+Layout matches `SherpaModels.fromModelsDir` (`silero_vad.onnx`,
+`sherpa-onnx-whisper-<prefix>/`, `vits-piper-en_US-lessac-medium-int8/`).
+
+Add the dependency:
 
 ```yaml
 dependencies:
@@ -49,7 +71,7 @@ Build the speech kit and LLM once, then create an agent:
 ```dart
 import 'package:voice_forge/voice_forge.dart';
 
-final kit = SherpaKit.load(
+final kit = await SherpaKit.load(
   models: SherpaModels.fromModelsDir('models'),
 );
 
@@ -74,7 +96,8 @@ session.onAudio(pcm); // feed 48 kHz stereo Int16 PCM from the network
 ```
 
 For a complete end-to-end server (WebRTC offer/answer, data channel, agent
-loop) see the voice_forge repo's `examples/poc_server/agent_server.dart`.
+loop) see `examples/poc_server/agent_server.dart` in the voice_forge
+repository: https://github.com/iamudesharma/clinicguard
 
 ### Tool calling
 
@@ -118,7 +141,7 @@ session.configure(
 
 ## Additional information
 
-- Repository: https://github.com/example/voice_forge (set to the real URL
+- Repository: https://github.com/iamudesharma/clinicguard (set to the real URL
   before the first release)
 - Client package: `voice_forge_flutter`
 - Speech bindings: `voice_forge_speech`

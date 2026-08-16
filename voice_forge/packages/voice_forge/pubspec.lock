@@ -17,6 +17,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "14.1.0"
+  archive:
+    dependency: "direct main"
+    description:
+      name: archive
+      sha256: a96e8b390886ee8abb49b7bd3ac8df6f451c621619f52a26e815fdcf568959ff
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.9"
   args:
     dependency: transitive
     description:
@@ -241,6 +249,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.2"
+  posix:
+    dependency: transitive
+    description:
+      name: posix
+      sha256: bc1bad54ad2b735816e31f8d4600cfde6c7839975085ddfbca48b6c9f7c4044e
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.5.2"
   pub_semver:
     dependency: transitive
     description:
@@ -380,9 +396,10 @@ packages:
   voice_forge_speech:
     dependency: "direct main"
     description:
-      path: "../voice_forge_speech"
-      relative: true
-    source: path
+      name: voice_forge_speech
+      sha256: "7a0beea619b984f08aaebe0bfd17391bfe119b89dacb2b6c5a3906bbf635c8af"
+      url: "https://pub.dev"
+    source: hosted
     version: "1.13.5"
   wasm_ffi:
     dependency: transitive

@@ -10,6 +10,7 @@ export 'src/agent/voice_agent.dart';
 export 'src/llm/llm.dart';
 export 'src/session/agent_session.dart';
 export 'src/speech/interfaces.dart';
+export 'src/speech/native_download.dart';
 export 'src/speech/resample.dart';
 export 'src/speech/sherpa_kit.dart';
 export 'src/transport/audio_core.dart';

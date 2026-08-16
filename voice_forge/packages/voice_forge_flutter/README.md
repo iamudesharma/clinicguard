@@ -1,6 +1,6 @@
 # voice_forge_flutter
 
-Flutter client for [voice_forge](https://github.com/example/voice_forge) voice
+Flutter client for [voice_forge](https://github.com/iamudesharma/clinicguard) voice
 agents: mic → WebRTC → agent, with the `agent.events` data-channel contract,
 automatic playback of agent audio, and instant barge-in.
 
@@ -23,9 +23,11 @@ iOS, Android, and desktop. No LiveKit, no tokens.
 
 ## Getting started
 
-Run a voice_forge agent server first (see the voice_forge repo:
-`dart run bin/agent_server.dart` in `examples/poc_server` — serves
-`ws://host:8765/signal`).
+This package is the client half: it connects to a running voice_forge agent
+server (any process speaking the voice_forge signaling contract over
+WebSocket at `ws://host:8765/signal` — typically a `voice_forge` server with
+an `AgentSession` loop). See the voice_forge repository for a complete agent
+server example: https://github.com/iamudesharma/clinicguard
 
 Add the dependency:
 
@@ -74,6 +76,6 @@ as-is, and any non-JSON message arrives as `{'type': 'raw', 'text': ...}`.
 ## Additional information
 
 - Server framework: `voice_forge` (pure Dart)
-- Repository: https://github.com/example/voice_forge (set to the real URL
+- Repository: https://github.com/iamudesharma/clinicguard (set to the real URL
   before the first release)
 - License: MIT

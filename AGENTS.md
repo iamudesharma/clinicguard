@@ -47,7 +47,11 @@ flutter test / flutter analyze      # keep green after any change
 ```
 
 Notes: the agent needs `models/` + `third_party/native/` (gitignored, fetched
-by the scripts) and runs from the example dirs (relative model paths).
+by the scripts). Standalone users don't — `SherpaKit.load()` auto-downloads
+the native library (cache: `~/.cache/voice_forge/native/`, override
+`VOICE_FORGE_NATIVE_DIR`) and missing standard models on first run
+(`autoDownload: false` opts out). The agent runs from the example dirs
+(relative model paths).
 LLM comes from env with automatic failover, in this order: **Cline first**
 (`CLINE_API_KEY`, `CLINE_MODEL`, default `poolside/laguna-s-2.1:free`, base
 `https://api.cline.bot/api/v1` — note Cline wraps responses in a `data`

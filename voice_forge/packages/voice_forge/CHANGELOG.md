@@ -2,6 +2,13 @@
 
 * Renamed from `voicepipe` to `voice_forge` (same package, new brand; part of
   the `*_forge` family alongside `image_forge_core` / `video_forge`).
+* **First-run auto-download**: `SherpaKit.load` fetches the prebuilt
+  `libsherpa-onnx-c-api` native library (into
+  `~/.cache/voice_forge/native/`, overridable via `VOICE_FORGE_NATIVE_DIR`)
+  and any missing standard speech models (silero VAD, Whisper, Piper) from
+  the official sherpa-onnx releases — no manual download step. Opt out with
+  `autoDownload: false`.
+* `SherpaKit.load` / `loadNative` are now async (`await SherpaKit.load(...)`).
 * Initial pub.dev-ready release of the voice_forge framework.
 * WebRTC transport (`VoiceCallServer`, `PeerSession`) with WebSocket
   signaling and the `agent.events` data channel.
