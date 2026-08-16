@@ -7,6 +7,10 @@ __pycache__/
 # Downloaded voice/model weights
 server/models/
 
+# Downloaded RAG dataset (MedQuAD zip + extracted XML)
+server/rag_data/medquad/
+server/rag_data/*.zip
+
 # macOS
 .DS_Store
 

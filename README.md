@@ -84,7 +84,10 @@ server/   Python backend (control plane + legacy LiveKit agent)
   triage/tools.py         LLM function tools (register_patient, assign_urgency, ...)
   triage/summarizer.py    structured EHR summary generation (Groq/OpenRouter/Zen)
   triage/extractor.py     Pydantic-AI live EHR extraction
-  api/main.py             FastAPI: /token, /patients, /sessions/{id}/summary, /transcripts
+  rag/embeddings.py       embeddings client (EMBEDDING_* > OpenAI > free OpenRouter nemotron-3-embed-1b)
+  scripts/rag_build.py    RAG pipeline: fetch MedQuAD (CC BY 4.0) + curated snippets → embed → Supabase pgvector
+  rag_data/               curated ClinicGuard snippets + downloaded MedQuAD (gitignored)
+  api/main.py             FastAPI: /token, /patients, /sessions/{id}/summary, /transcripts, /rag/{status,search,ingest}
   supabase/schema.sql     tables + RLS policies
 voicepipe/  100% Dart voice-agent framework (LiveKit-free, see voicepipe/README.md)
   packages/voicepipe            transport + speech (sherpa-onnx) + LLM + session loop
@@ -117,6 +120,7 @@ docs/     demo script + tunneling guide
 | **Supabase** *(optional)* | persistence + realtime EHR sync | https://supabase.com → run `server/supabase/schema.sql` |
 
 No signup needed for **Whisper** (STT), **Piper/Kokoro** (TTS) — models auto-download on first run.
+**RAG embeddings** use OpenRouter's free `nvidia/nemotron-3-embed-1b` when `OPENROUTER_API_KEY` is set (no extra cost); the knowledge base itself is MedQuAD (CC BY 4.0) + curated ClinicGuard snippets.
 
 ### 2. Run the backend
 

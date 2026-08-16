@@ -24,12 +24,17 @@ class BargeInDetector {
   /// Called once when speech ends.
   void Function() onSpeechEnd;
 
+  /// Called every 20ms window with the RMS level (0..1) — drives the
+  /// animated voice orb on web; unused on native.
+  void Function(double level)? onAudioLevel;
+
   BargeInDetector({
     this.rmsThreshold = 0.025,
     this.voicedFramesToStart = 2,
     this.silentFramesToEnd = 12,
     required this.onSpeechStart,
     required this.onSpeechEnd,
+    this.onAudioLevel,
   });
 
   static const int _windowSizeSamples = 320; // 20ms at 16kHz
@@ -61,6 +66,7 @@ class BargeInDetector {
       sumSq += s * s;
     }
     final rms = sqrt(sumSq / _windowSizeSamples);
+    onAudioLevel?.call(rms);
     final voiced = rms >= rmsThreshold;
 
     if (!_speaking) {

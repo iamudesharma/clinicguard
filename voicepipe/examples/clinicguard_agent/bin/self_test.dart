@@ -197,7 +197,8 @@ void main() async {
   final replySeen = assistantCount >= 1;
   dc.sendString(jsonEncode({'event': 'end_call'}));
   stdout.writeln('  [client] end_call sent, waiting for summary...');
-  final summaryDeadline = DateTime.now().add(const Duration(seconds: 8));
+  final summaryDeadline =
+      DateTime.now().add(const Duration(seconds: 60)); // free-tier LLM is slow
   while (summary == null && DateTime.now().isBefore(summaryDeadline)) {
     await Future<void>.delayed(const Duration(milliseconds: 200));
   }

@@ -98,10 +98,19 @@ def build_llm():
             temperature=settings.llm_temperature,
         )
 
+    def _gemini():
+        return openai_plugin.LLM(
+            model=settings.gemini_model,
+            api_key=settings.gemini_api_key,
+            base_url=settings.gemini_base_url,
+            temperature=settings.llm_temperature,
+        )
+
     backends = {
         "groq": (_groq, settings.groq_api_key),
         "openrouter": (_openrouter, settings.openrouter_api_key),
         "opencode": (_opencode, settings.opencode_api_key),
+        "gemini": (_gemini, settings.gemini_api_key),
     }
 
     primary_factory, primary_key = backends.get(settings.llm_backend, backends["groq"])
