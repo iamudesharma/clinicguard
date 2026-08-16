@@ -1,3 +1,7 @@
+## 0.1.1
+
+* pub.dev score fix: added an `example/` Flutter app.
+
 ## 0.1.0
 
 * Renamed from `voicepipe_flutter` to `voice_forge_flutter` (same package,

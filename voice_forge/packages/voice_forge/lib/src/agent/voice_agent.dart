@@ -35,10 +35,10 @@ class VoiceAgent {
   /// One session per call: owns its conversation history, its own VAD state,
   /// and its event streams.
   AgentSession createSession() => AgentSession(
-        vad: vadFactory(),
-        stt: stt,
-        tts: tts,
-        llm: llm,
-        systemPrompt: systemPrompt,
-      );
+    vad: vadFactory(),
+    stt: stt,
+    tts: tts,
+    llm: llm,
+    systemPrompt: systemPrompt,
+  );
 }

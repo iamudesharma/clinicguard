@@ -24,8 +24,9 @@ import 'native_download.dart';
 Future<DynamicLibrary> loadSherpaLibrary({bool autoDownload = true}) async {
   final os = Platform.operatingSystem;
   final arch = Platform.version.contains('arm64') ? 'arm64' : 'x86_64';
-  final dylib =
-      os == 'macos' ? 'libsherpa-onnx-c-api.dylib' : 'libsherpa-onnx-c-api.so';
+  final dylib = os == 'macos'
+      ? 'libsherpa-onnx-c-api.dylib'
+      : 'libsherpa-onnx-c-api.so';
   final cacheDir = nativeCacheDir();
   final candidates = <String>[
     'third_party/native/$os-$arch/$dylib',
@@ -90,10 +91,12 @@ class SherpaModels {
     required this.piperDir,
   });
 
-  /// Standard layout under [modelsDir]: silero_vad.onnx,
-  /// sherpa-onnx-whisper-<prefix>/, vits-piper-en_US-lessac-medium-int8/.
-  factory SherpaModels.fromModelsDir(String modelsDir,
-      {String whisperPrefix = 'tiny'}) {
+  /// Standard layout under [modelsDir]: `silero_vad.onnx`,
+  /// `sherpa-onnx-whisper-<prefix>/`, `vits-piper-en_US-lessac-medium-int8/`.
+  factory SherpaModels.fromModelsDir(
+    String modelsDir, {
+    String whisperPrefix = 'tiny',
+  }) {
     return SherpaModels(
       sileroVad: '$modelsDir/silero_vad.onnx',
       whisperDir: '$modelsDir/sherpa-onnx-whisper-$whisperPrefix',
@@ -140,8 +143,10 @@ class SherpaKit {
       sherpa.OfflineRecognizerConfig(
         model: sherpa.OfflineModelConfig(
           whisper: sherpa.OfflineWhisperModelConfig(
-            encoder: '${models.whisperDir}/${models.whisperPrefix}-encoder.int8.onnx',
-            decoder: '${models.whisperDir}/${models.whisperPrefix}-decoder.int8.onnx',
+            encoder:
+                '${models.whisperDir}/${models.whisperPrefix}-encoder.int8.onnx',
+            decoder:
+                '${models.whisperDir}/${models.whisperPrefix}-decoder.int8.onnx',
             language: '', // auto-detect (en/hi)
           ),
           tokens: '${models.whisperDir}/${models.whisperPrefix}-tokens.txt',
@@ -206,8 +211,7 @@ class SherpaKit {
 
   /// Convenience: all three implementations in one place.
   ({VoicepipeVAD Function() vadFactory, VoicepipeSTT stt, VoicepipeTTS tts})
-      get speech =>
-          (vadFactory: createVad, stt: stt, tts: tts);
+  get speech => (vadFactory: createVad, stt: stt, tts: tts);
 
   void dispose() {
     for (final vad in _vads) {
@@ -253,7 +257,7 @@ class _SherpaStt implements VoicepipeSTT {
   _SherpaStt(this.kit);
 
   @override
-  String transcribe(Float32List segment16k) {
+  Future<String> transcribe(Float32List segment16k) async {
     final stream = kit._recognizer!.createStream();
     stream.acceptWaveform(samples: segment16k, sampleRate: 16000);
     kit._recognizer!.decode(stream);
