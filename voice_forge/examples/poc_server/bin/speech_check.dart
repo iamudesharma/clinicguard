@@ -14,12 +14,21 @@ import 'package:opus_codec_dart/opus_codec_dart.dart';
 import 'package:voice_forge/voice_forge.dart';
 
 void initOpusLibrary() {
-  for (final path in ['/opt/homebrew/opt/opus/lib/libopus.dylib']) {
+  final candidates = <String>[
+    '/opt/homebrew/opt/opus/lib/libopus.dylib',
+    '/opt/homebrew/lib/libopus.dylib',
+    '/usr/local/lib/libopus.dylib',
+    'libopus.dylib',
+    'libopus.so.0',
+    'opus.dll',
+  ];
+  for (final path in candidates) {
     try {
       initOpus(DynamicLibrary.open(path));
       return;
     } catch (_) {}
   }
+  throw StateError('libopus not found (install libopus or set the path)');
 }
 
 Future<void> main() async {

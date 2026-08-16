@@ -1,4 +1,5 @@
 name: clinicguard_agent
+resolution: workspace
 description: >-
   ClinicGuard voice agent on voice_forge: triage prompt, greeting, transcript
   persistence to the Python FastAPI control plane, and a summary event at
@@ -13,8 +14,3 @@ dependencies:
   opus_codec_dart: ^3.0.5
   voice_forge:
     path: ../../packages/voice_forge
-
-# Local override until voice_forge_speech is live on pub.dev (see PUBLISHING.md).
-dependency_overrides:
-  voice_forge_speech:
-    path: ../../packages/voice_forge_speech

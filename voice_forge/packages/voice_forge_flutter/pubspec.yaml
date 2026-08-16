@@ -1,4 +1,5 @@
 name: voice_forge_flutter
+resolution: workspace
 description: >-
   Flutter client for voice_forge: WebRTC voice calls with flutter_webrtc,
   WebSocket signaling, the agent.events data-channel contract, and barge-in.
