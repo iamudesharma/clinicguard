@@ -25,7 +25,7 @@ abstract interface class VoicepipeVAD {
 /// Speech-to-text for completed segments.
 abstract interface class VoicepipeSTT {
   /// Transcribe a 16 kHz mono float segment; returns the trimmed text.
-  String transcribe(Float32List segment16k);
+  Future<String> transcribe(Float32List segment16k);
 }
 
 /// Text-to-speech output.

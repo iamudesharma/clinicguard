@@ -12,7 +12,12 @@ import 'dart:typed_data';
 /// Downmix stereo interleaved to mono, then decimate [srcRate] -> [dstRate]
 /// with a 5-tap moving-average low-pass. [srcRate] must be a multiple of
 /// [dstRate] for exact ratios.
-Float32List downmixAndResample(Int16List pcm, int srcRate, int srcChannels, int dstRate) {
+Float32List downmixAndResample(
+  Int16List pcm,
+  int srcRate,
+  int srcChannels,
+  int dstRate,
+) {
   final mono = Float32List(pcm.length ~/ srcChannels);
   for (var i = 0; i < mono.length; i++) {
     var sum = 0;

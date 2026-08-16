@@ -1,3 +1,7 @@
+## 1.13.5+1
+
+* pub.dev score fixes: added an `example/` and shortened the pubspec description.
+
 ## 1.13.5
 
 * Renamed from `sherpa_onnx_dart` to `voice_forge_speech` (same package, new

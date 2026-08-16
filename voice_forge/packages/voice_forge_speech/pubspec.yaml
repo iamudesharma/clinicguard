@@ -1,10 +1,9 @@
 name: voice_forge_speech
 description: >-
-  Pure-Dart FFI bindings for sherpa-onnx (k2-fsa): Silero VAD, Whisper and
-  other ASR, Piper TTS, speaker ID, and more. Flutter-free, server-side
-  build of the official sherpa_onnx Dart package (Apache-2.0) with a small
-  patch that lets the host process inject the loaded native library.
-version: 1.13.5
+  Pure-Dart FFI bindings for sherpa-onnx (k2-fsa): Silero VAD, Whisper ASR,
+  Piper TTS and more. Flutter-free, server-side build of the official
+  sherpa_onnx Dart package (Apache-2.0).
+version: 1.13.5+1
 repository: https://github.com/iamudesharma/clinicguard
 
 environment:
