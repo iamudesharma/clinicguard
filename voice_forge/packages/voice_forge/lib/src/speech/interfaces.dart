@@ -23,6 +23,10 @@ abstract interface class VoicepipeVAD {
 }
 
 /// Speech-to-text for completed segments.
+///
+/// Transcriptions are async: implementations may run the (potentially slow)
+/// recognition off the caller's isolate, e.g. in a worker isolate, so the
+/// voice loop stays responsive.
 abstract interface class VoicepipeSTT {
   /// Transcribe a 16 kHz mono float segment; returns the trimmed text.
   Future<String> transcribe(Float32List segment16k);
@@ -36,6 +40,8 @@ class TtsAudio {
 }
 
 /// Text-to-speech for agent replies.
+///
+/// Synthesis is async like [VoicepipeSTT] (see its doc comment).
 abstract interface class VoicepipeTTS {
-  TtsAudio synthesize(String text);
+  Future<TtsAudio> synthesize(String text);
 }

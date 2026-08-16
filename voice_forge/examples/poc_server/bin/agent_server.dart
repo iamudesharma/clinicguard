@@ -106,10 +106,14 @@ Future<void> main() async {
   stdout.writeln('LLM: '
       '${llm is EchoLlm ? "EchoLlm (offline demo; set GROQ_API_KEY/OPENAI_API_KEY for real replies)" : "OpenAI-compatible"}');
 
+  // STT/TTS run in a worker isolate so speech never blocks the LLM turn;
+  // VAD stays on the main isolate (cheap, one stateful instance per call).
+  final speech = await kit.createWorkerSpeech();
+
   final agent = VoiceAgent(
     vadFactory: kit.createVad,
-    stt: kit.speech.stt,
-    tts: kit.speech.tts,
+    stt: speech.stt,
+    tts: speech.tts,
     llm: llm,
   );
 

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
@@ -494,6 +495,237 @@ void main() {
     await llm.reply([const ChatMessage('user', 'hi')]); // skips primary
     expect(primary.calls, 3);
   });
+
+  test(
+    'FallbackLlm streams via the primary and falls back on failure',
+    () async {
+      var primaryCalls = 0;
+      final primary = _ThrowingLlm(() {
+        primaryCalls++;
+        throw LlmException('503: boom');
+      });
+      final llm = FallbackLlm(primary: primary, fallback: EchoLlm('fb reply'));
+      final partials = <String>[];
+      final reply = await llm.streamReplyWithTools(const [
+        ChatMessage('user', 'hi'),
+      ], onPartial: partials.add);
+      expect(reply.content, 'fb reply');
+      expect(partials, ['fb reply']);
+      expect(primaryCalls, 1);
+    },
+  );
+
+  test('streamReplyWithTools parses SSE deltas and assembles tool calls', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final port = server.port;
+    final sentBodies = <String>[];
+    server.listen((req) async {
+      sentBodies.add(await utf8.decoder.bind(req).join());
+      final res = req.response
+        ..statusCode = 200
+        ..headers.contentType = ContentType('text', 'event-stream');
+      // Written incrementally like a real provider: content deltas,
+      // a reasoning delta (must never reach onPartial), then tool-call
+      // fragments split across events.
+      res.write(
+        r'data: {"choices":[{"delta":{"role":"assistant","content":"Hello "}}]}'
+        '\n\n',
+      );
+      await res.flush();
+      res.write(
+        r'data: {"choices":[{"delta":{"reasoning_content":"(thinking)"}}]}'
+        '\n\n',
+      );
+      res.write(
+        r'data: {"choices":[{"delta":{"content":"world"}}]}'
+        '\n\n',
+      );
+      await res.flush();
+      res.write(
+        r'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+        r'"function":{"name":"get_available_slots","arguments":"{\"day\":\""}}]}}]}'
+        '\n\n',
+      );
+      res.write(
+        r'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+        r'"function":{"arguments":"tomorrow\"}"}}]}}]}'
+        '\n\n',
+      );
+      res.write('data: [DONE]\n\n');
+      await res.close();
+    });
+
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'http://127.0.0.1:$port/v1',
+      apiKey: 'k',
+      model: 'm',
+    );
+    final partials = <String>[];
+    final reply = await llm.streamReplyWithTools(const [
+      ChatMessage('user', 'hi'),
+    ], onPartial: partials.add);
+    await server.close(force: true);
+
+    // Reasoning deltas skipped, content deltas delivered in order.
+    expect(partials, ['Hello ', 'world']);
+    expect(reply.content, 'Hello world');
+    // Tool-call arguments assembled across the two fragments.
+    expect(reply.toolCalls.length, 1);
+    expect(reply.toolCalls.first.id, 'call_1');
+    expect(reply.toolCalls.first.name, 'get_available_slots');
+    expect(reply.toolCalls.first.arguments, {'day': 'tomorrow'});
+    // The request asked for streaming, with the default max_tokens.
+    final sent = jsonDecode(sentBodies.single) as Map<String, dynamic>;
+    expect(sent['stream'], true);
+    expect(sent['max_tokens'], 80);
+    expect(sent.containsKey('stream_options'), isFalse);
+  });
+
+  test(
+    'streamReplyWithTools falls back to plain JSON when SSE yields no deltas',
+    () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          'data: {"choices":[{"message":{"content":"plain json reply"}}]}\n\n'
+          'data: [DONE]\n\n',
+          200,
+          headers: {'content-type': 'text/event-stream'},
+        ),
+      );
+      final llm = OpenAiCompatibleLlm(
+        baseUrl: 'https://api.test/v1',
+        apiKey: 'k',
+        model: 'm',
+        client: client,
+      );
+      final reply = await llm.streamReplyWithTools(const [
+        ChatMessage('user', 'hi'),
+      ]);
+      expect(reply.content, 'plain json reply');
+    },
+  );
+
+  test('streamReplyWithTools parses a plain JSON response when the provider '
+      'ignores stream: true', () async {
+    final client = MockClient((request) async {
+      expect(jsonDecode(request.body)['stream'], true);
+      return http.Response(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {'content': 'plain reply'},
+            },
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'https://api.test/v1',
+      apiKey: 'k',
+      model: 'm',
+      client: client,
+    );
+    final reply = await llm.streamReplyWithTools(const [
+      ChatMessage('user', 'hi'),
+    ]);
+    expect(reply.content, 'plain reply');
+  });
+
+  test('streamReplyWithTools throws on a non-200 SSE error', () async {
+    final client = MockClient(
+      (_) async => http.Response(
+        'data: {"error":{"message":"model exploded"}}\n\n',
+        500,
+        headers: {'content-type': 'text/event-stream'},
+      ),
+    );
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'https://api.test/v1',
+      apiKey: 'k',
+      model: 'm',
+      client: client,
+    );
+    expect(
+      () => llm.streamReplyWithTools(const [ChatMessage('user', 'x')]),
+      throwsA(isA<LlmException>()),
+    );
+  });
+
+  test('streamReplyWithTools retries without tools on a tools 400', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls++;
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      if (calls == 1) {
+        expect(body['tools'], isNotNull);
+        return http.Response(
+          jsonEncode({
+            'error': {'message': 'tools are not supported'},
+          }),
+          400,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      // Retry streams without the tools key.
+      expect(body.containsKey('tools'), isFalse);
+      return http.Response(
+        'data: {"choices":[{"delta":{"content":"retried"}}]}\n\n'
+        'data: [DONE]\n\n',
+        200,
+        headers: {'content-type': 'text/event-stream'},
+      );
+    });
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'https://api.test/v1',
+      apiKey: 'k',
+      model: 'm',
+      client: client,
+    );
+    final reply = await llm.streamReplyWithTools(
+      const [ChatMessage('user', 'hi')],
+      tools: [
+        ToolDef(
+          name: 'book_appointment',
+          description: 'book it',
+          parameters: const {'type': 'object'},
+        ),
+      ],
+    );
+    expect(calls, 2);
+    expect(reply.content, 'retried');
+  });
+
+  test('maxTokens: 0 omits max_tokens from the request body', () async {
+    final client = MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body.containsKey('max_tokens'), isFalse);
+      return http.Response(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {'content': 'ok'},
+            },
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'https://api.test/v1',
+      apiKey: 'k',
+      model: 'm',
+      maxTokens: 0,
+      client: client,
+    );
+    expect(
+      (await llm.streamReplyWithTools(const [ChatMessage('user', 'x')]))
+          .content,
+      'ok',
+    );
+  });
 }
 
 class _ThrowingLlm implements VoicepipeLlm {
@@ -502,7 +734,7 @@ class _ThrowingLlm implements VoicepipeLlm {
   _ThrowingLlm(this._call);
 
   @override
-  Future<String> reply(List<ChatMessage> history) async {
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async {
     calls++;
     return _call();
   }
@@ -511,6 +743,18 @@ class _ThrowingLlm implements VoicepipeLlm {
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
+  }) async {
+    calls++;
+    return LlmReply(content: _call());
+  }
+
+  @override
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
   }) async {
     calls++;
     return LlmReply(content: _call());

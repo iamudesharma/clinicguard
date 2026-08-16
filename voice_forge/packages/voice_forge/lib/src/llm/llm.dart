@@ -1,6 +1,7 @@
 /// LLM interface + OpenAI-compatible HTTP implementation (and a mock for tests).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -84,13 +85,25 @@ class LlmReply {
 
 /// Minimal LLM contract: prompt -> text reply (plus optional tool calling).
 abstract interface class VoicepipeLlm {
-  Future<String> reply(List<ChatMessage> history);
+  /// [maxTokens] overrides the instance default for this call (0 disables).
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens});
 
   /// Like [reply] but offers [tools] to the model. The reply may contain
   /// tool calls instead of (or in addition to) spoken content.
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
+  });
+
+  /// Like [replyWithTools] but streams the response: [onPartial] fires with
+  /// each content delta as it arrives so TTS can start before the reply
+  /// completes. Returns the same [LlmReply] a non-streaming call would.
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
   });
 }
 
@@ -100,6 +113,7 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   final String apiKey;
   final String model;
   final double temperature;
+  final int maxTokens;
   final Duration timeout;
   final String name;
   final Map<String, String> _extraHeaders;
@@ -112,6 +126,7 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     required this.apiKey,
     required this.model,
     this.temperature = 0.3,
+    this.maxTokens = 80,
     this.timeout = const Duration(seconds: 45),
     String? name,
     Map<String, String>? extraHeaders,
@@ -150,8 +165,8 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   }
 
   @override
-  Future<String> reply(List<ChatMessage> history) async {
-    final r = await replyWithTools(history);
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async {
+    final r = await replyWithTools(history, maxTokens: maxTokens);
     final text = r.content;
     if (text == null || text.isEmpty) {
       throw LlmException('empty completion');
@@ -163,6 +178,7 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
   }) async {
     final sw = Stopwatch()..start();
     final uri = Uri.parse('$baseUrl/chat/completions');
@@ -170,13 +186,9 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
         .post(
           uri,
           headers: _headers(),
-          body: jsonEncode({
-            'model': model,
-            'temperature': temperature,
-            if (tools != null && tools.isNotEmpty)
-              'tools': [for (final t in tools) t.toJson()],
-            'messages': [for (final m in history) _messageToJson(m)],
-          }),
+          body: jsonEncode(
+            _requestBody(history, tools: tools, maxTokens: maxTokens),
+          ),
         )
         .timeout(timeout);
     sw.stop();
@@ -187,7 +199,261 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
         '${res.body.length > 200 ? res.body.substring(0, 200) : res.body}',
       );
     }
-    var data = jsonDecode(res.body) as Map<String, dynamic>;
+    final reply = _parseJsonReply(jsonDecode(res.body) as Map<String, dynamic>);
+    _safeLog(
+      '[voice_forge] llm: $name -> ${sw.elapsedMilliseconds}ms '
+      '(${reply.toolCalls.length} tool call(s), ${history.length} messages)',
+    );
+    return reply;
+  }
+
+  @override
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
+  }) async {
+    final sw = Stopwatch()..start();
+    int? firstTokenMs;
+    var toolCalls = <LlmToolCall>[];
+
+    Future<LlmReply> attempt(List<ToolDef>? withTools) async {
+      final reply = await _streamRequest(
+        history,
+        tools: withTools,
+        onPartial: onPartial,
+        onFirstToken: () => firstTokenMs = sw.elapsedMilliseconds,
+        maxTokens: maxTokens,
+      );
+      toolCalls = reply.toolCalls;
+      return reply;
+    }
+
+    LlmReply reply;
+    try {
+      reply = await attempt(tools);
+    } on LlmException catch (e) {
+      // Some providers reject the `tools` key with a 400; retry once
+      // streaming without it (the session handles further fallbacks).
+      final message = e.message;
+      final rejectsTools =
+          message.startsWith('400:') &&
+          (message.toLowerCase().contains('tool') ||
+              message.toLowerCase().contains('function'));
+      if (tools != null && tools.isNotEmpty && rejectsTools) {
+        _safeLog(
+          '[voice_forge] llm-stream: $name got 400 on tools; retrying '
+          'without them',
+        );
+        reply = await attempt(null);
+      } else {
+        rethrow;
+      }
+    }
+    sw.stop();
+    _safeLog(
+      '[voice_forge] llm-stream: $name -> ${sw.elapsedMilliseconds}ms '
+      '(first token ${firstTokenMs}ms, ${toolCalls.length} tool call(s), '
+      '${history.length} messages)',
+    );
+    return reply;
+  }
+
+  /// Shared request body for plain and streaming completions. No
+  /// `stream_options`: some providers 400 on it.
+  Map<String, dynamic> _requestBody(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    bool stream = false,
+    int? maxTokens,
+  }) => {
+    'model': model,
+    'temperature': temperature,
+    if ((maxTokens ?? this.maxTokens) > 0)
+      'max_tokens': maxTokens ?? this.maxTokens,
+    if (tools != null && tools.isNotEmpty)
+      'tools': [for (final t in tools) t.toJson()],
+    if (stream) 'stream': true,
+    'messages': [for (final m in history) _messageToJson(m)],
+  };
+
+  /// Sends a streaming completion request and parses the response: SSE when
+  /// the server says so, plain JSON otherwise (some providers ignore
+  /// `stream: true` or fail with a JSON error body).
+  Future<LlmReply> _streamRequest(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    void Function()? onFirstToken,
+    int? maxTokens,
+  }) async {
+    final uri = Uri.parse('$baseUrl/chat/completions');
+    final res = await _client
+        .send(
+          http.Request('POST', uri)
+            ..headers.addAll(_headers())
+            ..body = jsonEncode(
+              _requestBody(
+                history,
+                tools: tools,
+                stream: true,
+                maxTokens: maxTokens,
+              ),
+            ),
+        )
+        .timeout(timeout);
+
+    if (res.statusCode != 200) {
+      final errorBody = await http.Response.fromStream(res);
+      throw LlmException(
+        '${res.statusCode}: '
+        '${errorBody.body.length > 200 ? errorBody.body.substring(0, 200) : errorBody.body}',
+      );
+    }
+    if (_isEventStream(res.headers)) {
+      return _parseSse(
+        res.stream,
+        onPartial: onPartial,
+        onFirstToken: onFirstToken,
+      );
+    }
+    final jsonBody = await http.Response.fromStream(res);
+    return _parseJsonReply(jsonDecode(jsonBody.body) as Map<String, dynamic>);
+  }
+
+  /// Parses SSE lines from a streaming chat-completions response: accumulates
+  /// `choices[0].delta` content and tool-call fragments, stops at `[DONE]` or
+  /// EOF, and guards the stream with a per-chunk idle timeout so a stuck
+  /// provider cannot hang the voice loop.
+  Future<LlmReply> _parseSse(
+    Stream<List<int>> stream, {
+    void Function(String partial)? onPartial,
+    void Function()? onFirstToken,
+  }) async {
+    final content = StringBuffer();
+    final toolFragments = <int, _ToolCallFragment>{};
+    final rawBody = StringBuffer();
+    var sawDelta = false;
+    var sawContent = false;
+
+    try {
+      await for (final line
+          in stream
+              .timeout(const Duration(seconds: 15))
+              .transform(utf8.decoder)
+              .transform(const LineSplitter())) {
+        if (!line.startsWith('data:')) continue;
+        final payload = line.substring('data:'.length).trim();
+        if (payload.isEmpty) continue;
+        if (payload == '[DONE]') break;
+        rawBody.writeln(payload);
+        Map<String, dynamic> event;
+        try {
+          event = jsonDecode(payload) as Map<String, dynamic>;
+        } catch (_) {
+          continue; // keep-alive or non-JSON payload
+        }
+        // Cline wraps the standard OpenAI response in a "data" object.
+        if (event['choices'] == null && event['data'] is Map<String, dynamic>) {
+          event = event['data'] as Map<String, dynamic>;
+        }
+        final choices = event['choices'];
+        if (choices is! List || choices.isEmpty) continue;
+        final delta =
+            ((choices.first as Map<String, dynamic>)['delta']
+                as Map<String, dynamic>?) ??
+            const <String, dynamic>{};
+        final deltaContent = delta['content'];
+        if (deltaContent is String && deltaContent.isNotEmpty) {
+          sawDelta = true;
+          if (!sawContent) {
+            sawContent = true;
+            onFirstToken?.call();
+          }
+          content.write(deltaContent);
+          onPartial?.call(deltaContent);
+        }
+        // Reasoning deltas (`reasoning_content` / `reasoning`) are never
+        // spoken: only `content` above is accumulated.
+        final rawCalls = delta['tool_calls'];
+        if (rawCalls is List) {
+          for (final raw in rawCalls) {
+            if (raw is! Map<String, dynamic>) continue;
+            sawDelta = true;
+            final index = (raw['index'] as num?)?.toInt() ?? 0;
+            final fragment = toolFragments.putIfAbsent(
+              index,
+              _ToolCallFragment.new,
+            );
+            final id = raw['id'];
+            if (id is String && id.isNotEmpty) fragment.id = id;
+            final fn = raw['function'];
+            if (fn is Map<String, dynamic>) {
+              final fnName = fn['name'];
+              if (fnName is String && fnName.isNotEmpty) fragment.name = fnName;
+              final args = fn['arguments'];
+              if (args is String && args.isNotEmpty) {
+                fragment.arguments.write(args);
+              }
+            }
+          }
+        }
+      }
+    } on TimeoutException {
+      throw LlmException('stream idle timeout');
+    }
+
+    // Some providers send a plain JSON body even with `stream: true`. If no
+    // delta was ever consumed but the accumulated data is valid JSON, parse
+    // it exactly like a non-streaming response.
+    if (!sawDelta) {
+      final raw = rawBody.toString();
+      if (raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map<String, dynamic>) {
+            return _parseJsonReply(decoded);
+          }
+        } catch (_) {
+          throw LlmException(
+            'no choices in stream: '
+            '${raw.length > 200 ? raw.substring(0, 200) : raw}',
+          );
+        }
+      }
+      throw LlmException('empty completion');
+    }
+
+    final indices = toolFragments.keys.toList()..sort();
+    final toolCalls = <LlmToolCall>[
+      for (final index in indices)
+        LlmToolCall(
+          id: toolFragments[index]!.id,
+          name: toolFragments[index]!.name,
+          arguments: _parseArguments(
+            toolFragments[index]!.arguments.toString(),
+          ),
+        ),
+    ];
+    final text = content.toString();
+    return LlmReply(
+      content: text.isNotEmpty ? text : null,
+      toolCalls: toolCalls,
+    );
+  }
+
+  bool _isEventStream(Map<String, String> headers) {
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == 'content-type' &&
+          entry.value.toLowerCase().contains('text/event-stream')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  LlmReply _parseJsonReply(Map<String, dynamic> data) {
     // Cline wraps the standard OpenAI response in a "data" object.
     if (data['choices'] == null && data['data'] is Map<String, dynamic>) {
       data = data['data'] as Map<String, dynamic>;
@@ -210,10 +476,6 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
         );
       }
     }
-    _safeLog(
-      '[voice_forge] llm: $name -> ${sw.elapsedMilliseconds}ms '
-      '(${toolCalls.length} tool call(s), ${history.length} messages)',
-    );
     return LlmReply(
       content: content is String && content.isNotEmpty ? content.trim() : null,
       toolCalls: toolCalls,
@@ -252,6 +514,15 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   }
 }
 
+/// Accumulates one tool-call from streaming deltas: providers split a call
+/// across several SSE events keyed by `index`, sending `id`, `function.name`
+/// and `function.arguments` pieces in separate deltas.
+class _ToolCallFragment {
+  String id = '';
+  String name = '';
+  final StringBuffer arguments = StringBuffer();
+}
+
 /// Fixed-reply LLM for offline tests and demos without an API key.
 class EchoLlm implements VoicepipeLlm {
   final String replyText;
@@ -261,13 +532,26 @@ class EchoLlm implements VoicepipeLlm {
   ]);
 
   @override
-  Future<String> reply(List<ChatMessage> history) async => replyText;
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async =>
+      replyText;
 
   @override
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
   }) async => LlmReply(content: replyText);
+
+  @override
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
+  }) async {
+    onPartial?.call(replyText);
+    return LlmReply(content: replyText);
+  }
 }
 
 /// Provider failover: [primary] is used by default; after [failureThreshold]
@@ -353,16 +637,31 @@ class FallbackLlm implements VoicepipeLlm {
   }
 
   @override
-  Future<String> reply(List<ChatMessage> history) =>
-      _run((llm) => llm.reply(history), () => fallback.reply(history));
+  Future<String> reply(List<ChatMessage> history, {int? maxTokens}) =>
+      _run((llm) => llm.reply(history, maxTokens: maxTokens),
+          () => fallback.reply(history, maxTokens: maxTokens));
 
   @override
   Future<LlmReply> replyWithTools(
     List<ChatMessage> history, {
     List<ToolDef>? tools,
+    int? maxTokens,
   }) => _run(
-    (llm) => llm.replyWithTools(history, tools: tools),
-    () => fallback.replyWithTools(history, tools: tools),
+    (llm) => llm.replyWithTools(history, tools: tools, maxTokens: maxTokens),
+    () => fallback.replyWithTools(history, tools: tools, maxTokens: maxTokens),
+  );
+
+  @override
+  Future<LlmReply> streamReplyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    void Function(String partial)? onPartial,
+    int? maxTokens,
+  }) => _run(
+    (llm) => llm.streamReplyWithTools(history,
+        tools: tools, onPartial: onPartial, maxTokens: maxTokens),
+    () => fallback.streamReplyWithTools(history,
+        tools: tools, onPartial: onPartial, maxTokens: maxTokens),
   );
 }
 

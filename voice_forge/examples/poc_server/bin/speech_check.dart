@@ -87,7 +87,7 @@ Future<void> main() async {
   print('STT: ${segments.length} segments in ${ssw.elapsed.inSeconds}s');
 
   // --- TTS ----------------------------------------------------------------
-  final audio = tts.synthesize('Hello, I am your voice_forge agent.');
+  final audio = await tts.synthesize('Hello, I am your voice_forge agent.');
   final rms = audio.samples.isEmpty
       ? 0.0
       : sqrt(audio.samples.map((s) => s * s).reduce((a, b) => a + b) /

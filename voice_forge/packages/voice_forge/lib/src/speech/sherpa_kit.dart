@@ -14,6 +14,7 @@ import 'package:voice_forge_speech/voice_forge_speech.dart' as sherpa;
 
 import 'interfaces.dart';
 import 'native_download.dart';
+import 'worker.dart';
 
 /// Locate + load the sherpa-onnx native library.
 ///
@@ -112,6 +113,7 @@ class SherpaKit {
   final List<sherpa.VoiceActivityDetector> _vads = [];
   sherpa.OfflineRecognizer? _recognizer;
   sherpa.OfflineTts? _tts;
+  SpeechWorker? _worker;
   late SherpaModels _models;
 
   static bool _bound = false;
@@ -184,7 +186,7 @@ class SherpaKit {
       config: sherpa.VadModelConfig(
         sileroVad: sherpa.SileroVadModelConfig(
           model: _models.sileroVad,
-          minSilenceDuration: 0.35, // quick turn detection
+          minSilenceDuration: 0.30, // quick turn detection
           minSpeechDuration: 0.25,
           maxSpeechDuration: 15.0,
         ),
@@ -213,7 +215,28 @@ class SherpaKit {
   ({VoicepipeVAD Function() vadFactory, VoicepipeSTT stt, VoicepipeTTS tts})
   get speech => (vadFactory: createVad, stt: stt, tts: tts);
 
+  /// STT/TTS implementations that run in a long-lived worker isolate, so the
+  /// sync sherpa-onnx FFI calls (transcription/synthesis) never stall the
+  /// main isolate's event loop (RTP decode + VAD barge-in). The worker
+  /// re-initializes the native library + models in its own isolate; the
+  /// main-isolate instances above stay alive for single-session tools and
+  /// self-tests. Falls back to them on ANY worker init error — the voice
+  /// loop must never die because the worker failed.
+  Future<({VoicepipeSTT stt, VoicepipeTTS tts})> createWorkerSpeech() async {
+    try {
+      final worker = await SpeechWorker.start(models: _models);
+      _worker = worker;
+      return (stt: _WorkerStt(worker), tts: _WorkerTts(worker));
+    } catch (e) {
+      print('speech worker init failed ($e); '
+          'falling back to main-isolate STT/TTS');
+      return (stt: _SherpaStt(this), tts: _SherpaTts(this));
+    }
+  }
+
   void dispose() {
+    _worker?.dispose();
+    _worker = null;
     for (final vad in _vads) {
       vad.free();
     }
@@ -272,8 +295,25 @@ class _SherpaTts implements VoicepipeTTS {
   _SherpaTts(this.kit);
 
   @override
-  TtsAudio synthesize(String text) {
+  Future<TtsAudio> synthesize(String text) async {
     final audio = kit._tts!.generate(text: text, speed: 1.0, sid: 0);
     return TtsAudio(samples: audio.samples, sampleRate: audio.sampleRate);
   }
+}
+
+class _WorkerStt implements VoicepipeSTT {
+  final SpeechWorker worker;
+  _WorkerStt(this.worker);
+
+  @override
+  Future<String> transcribe(Float32List segment16k) =>
+      worker.transcribe(segment16k);
+}
+
+class _WorkerTts implements VoicepipeTTS {
+  final SpeechWorker worker;
+  _WorkerTts(this.worker);
+
+  @override
+  Future<TtsAudio> synthesize(String text) => worker.synthesize(text);
 }
