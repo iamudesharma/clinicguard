@@ -47,7 +47,16 @@ Future<void> main() async {
   print('sherpa-onnx ready (whisper=$whisperModel) in ${sw.elapsed.inSeconds}s');
 
   // --- STT + VAD ----------------------------------------------------------
-  final wave = File('$modelsDir/Obama.wav').readAsBytesSync();
+  final wavPath = '$modelsDir/Obama.wav';
+  if (!File(wavPath).existsSync()) {
+    print('downloading test audio (Obama.wav) ...');
+    await downloadFile(
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
+      'asr-models/Obama.wav',
+      wavPath,
+    );
+  }
+  final wave = File(wavPath).readAsBytesSync();
   final samples = Float32List((wave.length - 44) ~/ 2);
   for (var i = 0; i < samples.length; i++) {
     final offset = 44 + i * 2;
