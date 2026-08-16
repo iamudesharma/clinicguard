@@ -97,6 +97,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false # post-step uv cache pruning is flaky on runners
 
       - name: Sync + import check
         working-directory: server

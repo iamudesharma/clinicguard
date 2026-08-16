@@ -43,4 +43,4 @@ melos:
         flutter: false
     verify:
       run: melos run analyze && melos run test && melos run test:dart
-      description: Full local gate — mirrors the CI packages job (note: needs a TTY; CI uses `melos exec` directly).
+      description: "Full local gate — mirrors the CI packages job (needs a TTY; CI uses melos exec directly)."
