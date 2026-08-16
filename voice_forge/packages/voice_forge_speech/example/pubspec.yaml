@@ -1,0 +1,11 @@
+name: voice_forge_speech_example
+resolution: workspace
+description: Minimal usage example for voice_forge_speech.
+publish_to: none
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+
+dependencies:
+  voice_forge_speech:
+    path: ../

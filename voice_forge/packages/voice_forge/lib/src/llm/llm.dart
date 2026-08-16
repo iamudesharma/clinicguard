@@ -36,8 +36,7 @@ class ChatMessage {
   final List<LlmToolCall>? toolCalls;
   final String? toolCallId;
 
-  const ChatMessage(this.role, this.content,
-      {this.toolCalls, this.toolCallId});
+  const ChatMessage(this.role, this.content, {this.toolCalls, this.toolCallId});
 }
 
 /// An OpenAI-style function/tool definition (JSON-schema parameters).
@@ -53,13 +52,13 @@ class ToolDef {
   });
 
   Map<String, dynamic> toJson() => {
-        'type': 'function',
-        'function': {
-          'name': name,
-          'description': description,
-          'parameters': parameters,
-        },
-      };
+    'type': 'function',
+    'function': {
+      'name': name,
+      'description': description,
+      'parameters': parameters,
+    },
+  };
 }
 
 /// A function call requested by the model.
@@ -89,8 +88,10 @@ abstract interface class VoicepipeLlm {
 
   /// Like [reply] but offers [tools] to the model. The reply may contain
   /// tool calls instead of (or in addition to) spoken content.
-  Future<LlmReply> replyWithTools(List<ChatMessage> history,
-      {List<ToolDef>? tools});
+  Future<LlmReply> replyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+  });
 }
 
 /// OpenAI-compatible chat completions (Groq, OpenRouter, OpenCode Zen, ...).
@@ -115,14 +116,14 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     String? name,
     Map<String, String>? extraHeaders,
     http.Client? client,
-  })  : _client = client ?? http.Client(),
-        // Strip trailing slashes: providers document base URLs like
-        // ".../v1beta/openai/" and appending "/chat/completions" would 404.
-        baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
-        name = (name == null || name.isEmpty) ? model : name,
-        _extraHeaders = extraHeaders ?? const {},
-        _sessionId = _uuidV4(),
-        _projectId = _uuidV4();
+  }) : _client = client ?? http.Client(),
+       // Strip trailing slashes: providers document base URLs like
+       // ".../v1beta/openai/" and appending "/chat/completions" would 404.
+       baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
+       name = (name == null || name.isEmpty) ? model : name,
+       _extraHeaders = extraHeaders ?? const {},
+       _sessionId = _uuidV4(),
+       _projectId = _uuidV4();
 
   /// OpenCode Zen routes/validates requests by these client headers; without
   /// them it answers `FreeUsageLimitError` even with a valid key.
@@ -159,8 +160,10 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   }
 
   @override
-  Future<LlmReply> replyWithTools(List<ChatMessage> history,
-      {List<ToolDef>? tools}) async {
+  Future<LlmReply> replyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+  }) async {
     final sw = Stopwatch()..start();
     final uri = Uri.parse('$baseUrl/chat/completions');
     final res = await _client
@@ -172,17 +175,17 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
             'temperature': temperature,
             if (tools != null && tools.isNotEmpty)
               'tools': [for (final t in tools) t.toJson()],
-            'messages': [
-              for (final m in history) _messageToJson(m),
-            ],
+            'messages': [for (final m in history) _messageToJson(m)],
           }),
         )
         .timeout(timeout);
     sw.stop();
 
     if (res.statusCode != 200) {
-      throw LlmException('${res.statusCode}: '
-          '${res.body.length > 200 ? res.body.substring(0, 200) : res.body}');
+      throw LlmException(
+        '${res.statusCode}: '
+        '${res.body.length > 200 ? res.body.substring(0, 200) : res.body}',
+      );
     }
     var data = jsonDecode(res.body) as Map<String, dynamic>;
     // Cline wraps the standard OpenAI response in a "data" object.
@@ -198,15 +201,19 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
       for (final raw in rawCalls) {
         final call = raw as Map<String, dynamic>;
         final fn = call['function'] as Map<String, dynamic>;
-        toolCalls.add(LlmToolCall(
-          id: call['id'] as String? ?? '',
-          name: fn['name'] as String? ?? '',
-          arguments: _parseArguments(fn['arguments']),
-        ));
+        toolCalls.add(
+          LlmToolCall(
+            id: call['id'] as String? ?? '',
+            name: fn['name'] as String? ?? '',
+            arguments: _parseArguments(fn['arguments']),
+          ),
+        );
       }
     }
-    _safeLog('[voice_forge] llm: $name -> ${sw.elapsedMilliseconds}ms '
-        '(${toolCalls.length} tool call(s), ${history.length} messages)');
+    _safeLog(
+      '[voice_forge] llm: $name -> ${sw.elapsedMilliseconds}ms '
+      '(${toolCalls.length} tool call(s), ${history.length} messages)',
+    );
     return LlmReply(
       content: content is String && content.isNotEmpty ? content.trim() : null,
       toolCalls: toolCalls,
@@ -248,15 +255,19 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
 /// Fixed-reply LLM for offline tests and demos without an API key.
 class EchoLlm implements VoicepipeLlm {
   final String replyText;
-  EchoLlm([this.replyText = 'I am your triage assistant. Please tell me your symptoms.']);
+  EchoLlm([
+    this.replyText =
+        'I am your triage assistant. Please tell me your symptoms.',
+  ]);
 
   @override
   Future<String> reply(List<ChatMessage> history) async => replyText;
 
   @override
-  Future<LlmReply> replyWithTools(List<ChatMessage> history,
-      {List<ToolDef>? tools}) async =>
-      LlmReply(content: replyText);
+  Future<LlmReply> replyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+  }) async => LlmReply(content: replyText);
 }
 
 /// Provider failover: [primary] is used by default; after [failureThreshold]
@@ -286,13 +297,17 @@ class FallbackLlm implements VoicepipeLlm {
   /// (5m -> 10m -> 20m -> ... capped at 60m) so a provider that is exhausted
   /// for the day stops costing latency on every call.
   static final RegExp _rateLimit = RegExp(
-      r'429|rate.?limit|quota', caseSensitive: false);
+    r'429|rate.?limit|quota',
+    caseSensitive: false,
+  );
 
   bool get _primaryDown =>
       _primaryDownUntil != null && DateTime.now().isBefore(_primaryDownUntil!);
 
   Future<T> _run<T>(
-      Future<T> Function(VoicepipeLlm llm) call, Future<T> Function() onFallback) async {
+    Future<T> Function(VoicepipeLlm llm) call,
+    Future<T> Function() onFallback,
+  ) async {
     if (_primaryDown) return onFallback();
     final sw = Stopwatch()..start();
     try {
@@ -303,7 +318,9 @@ class FallbackLlm implements VoicepipeLlm {
     } catch (e) {
       sw.stop();
       _consecutiveFailures++;
-      _safeLog('[voice_forge] LLM call failed after ${sw.elapsedMilliseconds}ms: $e');
+      _safeLog(
+        '[voice_forge] LLM call failed after ${sw.elapsedMilliseconds}ms: $e',
+      );
       final rateLimited = _rateLimit.hasMatch('$e');
       if (rateLimited && _consecutiveFailures < 2) {
         // Transient burst quota (e.g. Google's 429s recover in seconds):
@@ -325,9 +342,11 @@ class FallbackLlm implements VoicepipeLlm {
           _primaryDownUntil = DateTime.now().add(cooldown);
         }
         _consecutiveFailures = 0;
-        _safeLog('[voice_forge] LLM provider down after ${sw.elapsedMilliseconds}ms'
-            '${rateLimited ? ' (rate limited)' : ''}; switching to fallback '
-            'for ${(rateLimited ? _rateLimitCooldown ~/ 2 : cooldown).inSeconds}s');
+        _safeLog(
+          '[voice_forge] LLM provider down after ${sw.elapsedMilliseconds}ms'
+          '${rateLimited ? ' (rate limited)' : ''}; switching to fallback '
+          'for ${(rateLimited ? _rateLimitCooldown ~/ 2 : cooldown).inSeconds}s',
+        );
       }
       return onFallback();
     }
@@ -338,10 +357,13 @@ class FallbackLlm implements VoicepipeLlm {
       _run((llm) => llm.reply(history), () => fallback.reply(history));
 
   @override
-  Future<LlmReply> replyWithTools(List<ChatMessage> history,
-          {List<ToolDef>? tools}) =>
-      _run((llm) => llm.replyWithTools(history, tools: tools),
-          () => fallback.replyWithTools(history, tools: tools));
+  Future<LlmReply> replyWithTools(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+  }) => _run(
+    (llm) => llm.replyWithTools(history, tools: tools),
+    () => fallback.replyWithTools(history, tools: tools),
+  );
 }
 
 class LlmException implements Exception {
@@ -351,9 +373,13 @@ class LlmException implements Exception {
   String toString() => 'LlmException: $message';
 }
 
-VoicepipeLlm _openAiCompatible(Map<String, String> env, String base,
-    String key, String model,
-    {double temperature = 0.3}) {
+VoicepipeLlm _openAiCompatible(
+  Map<String, String> env,
+  String base,
+  String key,
+  String model, {
+  double temperature = 0.3,
+}) {
   final timeoutSeconds =
       int.tryParse(env['VOICE_FORGE_LLM_TIMEOUT_SECONDS'] ?? '') ?? 45;
   return OpenAiCompatibleLlm(
@@ -404,68 +430,82 @@ VoicepipeLlm llmFromEnv(Map<String, String> env) {
   final candidates = <VoicepipeLlm>[];
   final clineKey = env['CLINE_API_KEY'];
   if (clineKey != null && clineKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://api.cline.bot/api/v1',
-      clineKey,
-      env['CLINE_MODEL'] ?? 'poolside/laguna-s-2.1:free',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://api.cline.bot/api/v1',
+        clineKey,
+        env['CLINE_MODEL'] ?? 'poolside/laguna-s-2.1:free',
+      ),
+    );
   }
   final opencodeGoKey = env['OPENCODE_GO_API_KEY'];
   // Zen (free) before Go (paid): free tier is the default workhorse, paid
   // billing only kicks in when the free one is down.
   if (opencodeKey != null && opencodeKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      env['OPENCODE_BASE_URL'] ?? 'https://opencode.ai/zen/v1',
-      opencodeKey,
-      // laguna-s-2.1-free: no chain-of-thought (thinking) -> fastest TTFT
-      // (~1.5s vs ~3.6s for deepseek-v4-flash-free), tool calling works.
-      env['OPENCODE_MODEL'] ?? 'laguna-s-2.1-free',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        env['OPENCODE_BASE_URL'] ?? 'https://opencode.ai/zen/v1',
+        opencodeKey,
+        // laguna-s-2.1-free: no chain-of-thought (thinking) -> fastest TTFT
+        // (~1.5s vs ~3.6s for deepseek-v4-flash-free), tool calling works.
+        env['OPENCODE_MODEL'] ?? 'laguna-s-2.1-free',
+      ),
+    );
   }
   if (opencodeGoKey != null && opencodeGoKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://opencode.ai/zen/go/v1',
-      opencodeGoKey,
-      env['OPENCODE_GO_MODEL'] ?? 'kimi-k3',
-      // kimi-k3 on the Go endpoint only accepts temperature == 1.
-      temperature: 1.0,
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://opencode.ai/zen/go/v1',
+        opencodeGoKey,
+        env['OPENCODE_GO_MODEL'] ?? 'kimi-k3',
+        // kimi-k3 on the Go endpoint only accepts temperature == 1.
+        temperature: 1.0,
+      ),
+    );
   }
   final geminiKey = env['GEMINI_API_KEY'];
   if (geminiKey != null && geminiKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://generativelanguage.googleapis.com/v1beta/openai/',
-      geminiKey,
-      env['GEMINI_MODEL'] ?? 'gemini-3.7-flash',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://generativelanguage.googleapis.com/v1beta/openai/',
+        geminiKey,
+        env['GEMINI_MODEL'] ?? 'gemini-3.7-flash',
+      ),
+    );
   }
   if (openrouterKey != null && openrouterKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://openrouter.ai/api/v1',
-      openrouterKey,
-      env['OPENROUTER_MODEL'] ?? 'openai/gpt-oss-20b:free',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://openrouter.ai/api/v1',
+        openrouterKey,
+        env['OPENROUTER_MODEL'] ?? 'openai/gpt-oss-20b:free',
+      ),
+    );
   }
   if (groqKey != null && groqKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://api.groq.com/openai/v1',
-      groqKey,
-      env['GROQ_MODEL'] ?? 'llama-3.3-70b-versatile',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://api.groq.com/openai/v1',
+        groqKey,
+        env['GROQ_MODEL'] ?? 'llama-3.3-70b-versatile',
+      ),
+    );
   }
   if (openaiKey != null && openaiKey.isNotEmpty) {
-    candidates.add(_openAiCompatible(
-      env,
-      'https://api.openai.com/v1',
-      openaiKey,
-      env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
-    ));
+    candidates.add(
+      _openAiCompatible(
+        env,
+        'https://api.openai.com/v1',
+        openaiKey,
+        env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
+      ),
+    );
   }
   if (candidates.isEmpty) return EchoLlm();
   var llm = candidates.first;

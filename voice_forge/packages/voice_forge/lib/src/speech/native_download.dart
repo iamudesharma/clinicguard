@@ -20,8 +20,7 @@ import 'package:http/http.dart' as http;
 /// the same version).
 const String kNativeVersion = '1.13.5';
 
-String _arch() =>
-    Platform.version.contains('arm64') ? 'arm64' : 'x86_64';
+String _arch() => Platform.version.contains('arm64') ? 'arm64' : 'x86_64';
 
 /// Release-asset platform key, e.g. `osx-arm64` or `linux-x64`.
 String nativePlatformKey() {
@@ -58,7 +57,8 @@ String _nativeFileName() {
 /// Where the auto-downloaded native library lives. Version-scoped so a
 /// bindings upgrade re-downloads instead of reusing a stale library.
 String nativeCacheDir() {
-  final base = Platform.environment['VOICE_FORGE_NATIVE_DIR'] ??
+  final base =
+      Platform.environment['VOICE_FORGE_NATIVE_DIR'] ??
       '${Platform.environment['HOME'] ?? Directory.current.path}'
           '/.cache/voice_forge/native';
   return '$base/${Platform.operatingSystem}-${_arch()}-v$kNativeVersion';
@@ -88,16 +88,12 @@ Future<String> downloadNativeLibrary(String cacheDir) async {
     for (final f in _unpack(resp.bodyBytes)) {
       final basename = f.name.split('/').last;
       if (basename == name || basename.startsWith('libonnxruntime')) {
-        File('$cacheDir/$basename').writeAsBytesSync(
-          f.content as List<int>,
-          flush: true,
-        );
+        File('$cacheDir/$basename')
+            .writeAsBytesSync(f.content as List<int>, flush: true);
       }
     }
     if (!File(libPath).existsSync()) {
-      throw StateError(
-        'Downloaded archive from $url did not contain $name.',
-      );
+      throw StateError('Downloaded archive from $url did not contain $name.');
     }
     return libPath;
   } finally {
@@ -107,9 +103,7 @@ Future<String> downloadNativeLibrary(String cacheDir) async {
 
 /// Unpack a `.tar.bz2` archive in memory (pure Dart).
 List<ArchiveFile> _unpack(Uint8List bytes) {
-  return TarDecoder()
-      .decodeBytes(BZip2Decoder().decodeBytes(bytes))
-      .files;
+  return TarDecoder().decodeBytes(BZip2Decoder().decodeBytes(bytes)).files;
 }
 
 /// Download + unpack a `.tar.bz2` asset into [dir] (e.g. whisper/piper

@@ -1,0 +1,46 @@
+name: voice_forge_workspace
+publish_to: none
+description: Monorepo for voice_forge, voice_forge_flutter and voice_forge_speech packages + examples.
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - packages/voice_forge
+  - packages/voice_forge/example
+  - packages/voice_forge_flutter
+  - packages/voice_forge_flutter/example
+  - packages/voice_forge_speech
+  - packages/voice_forge_speech/example
+  - examples/poc_server
+  - examples/poc_client
+  - examples/clinicguard_agent
+
+dev_dependencies:
+  melos: ^7.8.0
+
+melos:
+  scripts:
+    analyze:
+      run: dart analyze
+      exec:
+        concurrency: 2
+      packageFilters:
+        dirExists: lib
+    test:
+      run: flutter test
+      exec:
+        concurrency: 1
+      packageFilters:
+        dirExists: test
+        flutter: true
+    test:dart:
+      run: dart test
+      exec:
+        concurrency: 1
+      packageFilters:
+        dirExists: test
+        flutter: false
+    verify:
+      run: melos run analyze && melos run test && melos run test:dart
+      description: "Full local gate — mirrors the CI packages job (needs a TTY; CI uses melos exec directly)."

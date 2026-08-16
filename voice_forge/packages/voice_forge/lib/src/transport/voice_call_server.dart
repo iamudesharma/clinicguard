@@ -33,7 +33,7 @@ Future<HttpServer> runVoiceCallServer({
     );
   });
 
-  final handler = (Request req) async {
+  Future<Response> handler(Request req) async {
     switch (req.url.path) {
       case 'health':
         return Response.ok(
@@ -43,10 +43,12 @@ Future<HttpServer> runVoiceCallServer({
       case 'signal':
         return wsHandler(req);
       default:
-        return Response.notFound('{"status":"not_found"}',
-            headers: {'content-type': 'application/json'});
+        return Response.notFound(
+          '{"status":"not_found"}',
+          headers: {'content-type': 'application/json'},
+        );
     }
-  };
+  }
 
   final server = await shelf_io.serve(
     const Pipeline().addHandler(handler),

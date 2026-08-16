@@ -1,3 +1,9 @@
+## 0.2.1
+
+* pub.dev score fixes: added an `example/`, shortened the pubspec
+  description, and resolved all analyzer infos (async `VoicepipeSTT`,
+  null-aware elements, formatting).
+
 ## 0.2.0
 
 * Renamed from `voicepipe` to `voice_forge` (same package, new brand; part of
