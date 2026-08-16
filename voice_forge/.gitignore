@@ -12,3 +12,6 @@ build/
 patches/
 scripts/sherpa_sync.py
 UPSTREAM_SYNC.md
+
+# Example lockfiles (packages: not tracked)
+example/pubspec.lock

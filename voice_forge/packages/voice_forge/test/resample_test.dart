@@ -24,10 +24,9 @@ void main() {
     }
     final mono16k = downmixAndResample(pcm, rate, 2, 16000);
     expect(mono16k.length, rate ~/ 3); // exactly 1/3 of the mono length
-    final rms = sqrt(mono16k
-            .map((s) => s * s)
-            .reduce((a, b) => a + b) /
-        mono16k.length);
+    final rms = sqrt(
+      mono16k.map((s) => s * s).reduce((a, b) => a + b) / mono16k.length,
+    );
     // 0.5 amplitude tone -> rms ~0.354
     expect(rms, closeTo(0.354, 0.05));
   });

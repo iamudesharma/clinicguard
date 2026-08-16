@@ -96,11 +96,13 @@ class PeerSession {
   }
 
   Future<void> start() async {
-    _pc = RTCPeerConnection(RtcConfiguration(
-      iceServers: [
-        IceServer(urls: ['stun:stun.l.google.com:19302']),
-      ],
-    ));
+    _pc = RTCPeerConnection(
+      RtcConfiguration(
+        iceServers: [
+          IceServer(urls: ['stun:stun.l.google.com:19302']),
+        ],
+      ),
+    );
 
     _pc.onIceCandidate.listen((c) {
       _send({
@@ -134,8 +136,10 @@ class PeerSession {
   }
 
   void _logStats(Timer _) {
-    print('[peer$_id] stats: rx=$_packetsReceived decoded=$_packetsDecoded '
-        'sent=$_packetsSent frames=$_framesEncoded');
+    print(
+      '[peer$_id] stats: rx=$_packetsReceived decoded=$_packetsDecoded '
+      'sent=$_packetsSent frames=$_framesEncoded',
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -144,8 +148,10 @@ class PeerSession {
 
   void _onTrack(RTCRtpTransceiver transceiver) {
     final codec = transceiver.receiver.codec;
-    print('[peer$_id] track: ${codec.mimeType} '
-        'pt=${codec.payloadType} rate=${codec.clockRate} ch=${codec.channels}');
+    print(
+      '[peer$_id] track: ${codec.mimeType} '
+      'pt=${codec.payloadType} rate=${codec.clockRate} ch=${codec.channels}',
+    );
     if (!codec.mimeType.toLowerCase().contains('opus')) {
       print('[peer$_id] ignoring non-Opus track');
       return;
@@ -167,8 +173,9 @@ class PeerSession {
 
     // Outgoing pre-encoded RTP track: whatever we write() is sent to the peer
     // (SSRC + payload type are rewritten to the negotiated values).
-    final outTrack =
-        nonstandard.MediaStreamTrack(kind: nonstandard.MediaKind.audio);
+    final outTrack = nonstandard.MediaStreamTrack(
+      kind: nonstandard.MediaKind.audio,
+    );
     _outTrack = outTrack;
     transceiver.sender.registerNonstandardTrack(outTrack);
 
@@ -200,7 +207,7 @@ class PeerSession {
     // Feed the pipeline: VAD/STT (agent) or loopback encode.
     if (pcm.length == _samplesPerFrame) {
       core.onDecodedPcm(pcm);
-    } else if (pcm.length > 0) {
+    } else if (pcm.isNotEmpty) {
       // Non-20ms frames: buffer until a full frame accumulates.
       _pcmBuffer.addAll(pcm);
       while (_pcmBuffer.length >= _samplesPerFrame) {
@@ -240,9 +247,11 @@ class PeerSession {
     );
     _outTrack!.writeRtp(packet);
     if (_debugRtp && _sentLogged++ < 3) {
-      print('[peer$_id] SENT rtp pt=${packet.payloadType} '
-          'ssrc=${packet.ssrc} seq=${packet.sequenceNumber} '
-          'ts=${packet.timestamp} payload=${encoded.length}B');
+      print(
+        '[peer$_id] SENT rtp pt=${packet.payloadType} '
+        'ssrc=${packet.ssrc} seq=${packet.sequenceNumber} '
+        'ts=${packet.timestamp} payload=${encoded.length}B',
+      );
     }
   }
 
@@ -258,10 +267,9 @@ class PeerSession {
     // The onStateChange stream does not replay the current state: check it
     // synchronously, and only then listen for the transition.
     void onChannelOpen() {
-      dc.sendString(jsonEncode({
-        'type': 'hello',
-        'text': 'voice_forge agent ready',
-      }));
+      dc.sendString(
+        jsonEncode({'type': 'hello', 'text': 'voice_forge agent ready'}),
+      );
       if (dc.label == 'agent.events') {
         // Flush events queued before the channel opened, then start the core.
         for (final pending in _pendingEvents) {
@@ -288,11 +296,13 @@ class PeerSession {
     dc.onMessage.listen((message) {
       if (message is! String) return;
       if (message.startsWith('ping')) {
-        dc.sendString(jsonEncode({
-          'type': 'pong',
-          'echo': message,
-          'serverTime': DateTime.now().millisecondsSinceEpoch,
-        }));
+        dc.sendString(
+          jsonEncode({
+            'type': 'pong',
+            'echo': message,
+            'serverTime': DateTime.now().millisecondsSinceEpoch,
+          }),
+        );
         return;
       }
       try {
@@ -327,8 +337,11 @@ class PeerSession {
         print('[peer$_id] answered offer (${sdp.length} bytes)');
         if (_debugRtp) {
           File('/tmp/voice_forge_offer_$_id.sdp').writeAsStringSync(sdp);
-          File('/tmp/voice_forge_answer_$_id.sdp').writeAsStringSync(answer.sdp);
-          print('[peer$_id] SDP dumped to /tmp/voice_forge_{offer,answer}_$_id.sdp');
+          File('/tmp/voice_forge_answer_$_id.sdp')
+              .writeAsStringSync(answer.sdp);
+          print(
+            '[peer$_id] SDP dumped to /tmp/voice_forge_{offer,answer}_$_id.sdp',
+          );
         }
       case 'candidate':
         final c = msg['candidate'] as Map<String, dynamic>;

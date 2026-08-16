@@ -46,8 +46,7 @@ class AgentSession {
       StreamController<AgentEvent>.broadcast();
   final StreamController<Int16List> _ttsOut =
       StreamController<Int16List>.broadcast();
-  final StreamController<bool> _speaking =
-      StreamController<bool>.broadcast();
+  final StreamController<bool> _speaking = StreamController<bool>.broadcast();
 
   final List<ChatMessage> _history = [];
   final List<double> _vadWindow = []; // 16k mono float pending window
@@ -99,20 +98,14 @@ class AgentSession {
   Stream<bool> get speaking => _speaking.stream;
 
   AgentSession({
-    required VoicepipeVAD vad,
-    required VoicepipeSTT stt,
-    required VoicepipeTTS tts,
-    required VoicepipeLlm llm,
+    required this._vad,
+    required this._stt,
+    required this._tts,
+    required this._llm,
     String? systemPrompt,
-    double bargeInRmsThreshold = 0.03,
-    int bargeInOnsetFrames = 2,
-  })  : _vad = vad,
-        _stt = stt,
-        _tts = tts,
-        _llm = llm,
-        _systemPrompt = systemPrompt ?? _defaultPrompt,
-        _bargeInRmsThreshold = bargeInRmsThreshold,
-        _bargeInOnsetFrames = bargeInOnsetFrames;
+    this._bargeInRmsThreshold = 0.03,
+    this._bargeInOnsetFrames = 2,
+  }) : _systemPrompt = systemPrompt ?? _defaultPrompt;
 
   static const _defaultPrompt =
       'You are a voice triage assistant for a clinic. Ask concise questions '
@@ -141,10 +134,7 @@ class AgentSession {
   void _setState(AgentState s) {
     if (_state == s) return;
     _state = s;
-    _events.add(AgentEvent({
-      'type': 'agent_state',
-      'state': s.name,
-    }));
+    _events.add(AgentEvent({'type': 'agent_state', 'state': s.name}));
   }
 
   /// Speak an opening line (e.g. the greeting) before the caller talks.
@@ -182,15 +172,16 @@ class AgentSession {
           .join('\n');
       final reply = await _llm.reply([
         ChatMessage(
-            'system',
-            'Summarize the following triage call as JSON with EXACTLY these '
-            'keys: patient_name, chief_complaint (the patient\'s main problem '
-            'from the USER turns, e.g. "fever and headache"), symptoms '
-            '(array of strings from the USER turns), urgency_level '
-            '(low|medium|high|emergency), reason, recommendation, language. '
-            'Reply with the JSON object only.\n\n'
-            'TRANSCRIPT:\n$transcript'),
-        if (extra != null) extra,
+          'system',
+          'Summarize the following triage call as JSON with EXACTLY these '
+              'keys: patient_name, chief_complaint (the patient\'s main problem '
+              'from the USER turns, e.g. "fever and headache"), symptoms '
+              '(array of strings from the USER turns), urgency_level '
+              '(low|medium|high|emergency), reason, recommendation, language. '
+              'Reply with the JSON object only.\n\n'
+              'TRANSCRIPT:\n$transcript',
+        ),
+        ?extra,
       ]);
       return _extractJson(reply);
     } catch (e) {
@@ -212,7 +203,7 @@ class AgentSession {
           .join('\n');
       final reply = await _llm.reply([
         ChatMessage('system', '$instruction\n\nTRANSCRIPT:\n$transcript'),
-        if (extra != null) extra,
+        ?extra,
       ]);
       return _extractJson(reply);
     } catch (e) {
@@ -227,8 +218,9 @@ class AgentSession {
       final start = trimmed.indexOf('{');
       final end = trimmed.lastIndexOf('}');
       if (start >= 0 && end > start) {
-        final decoded =
-            jsonDecode(trimmed.substring(start, end + 1)) as Map<String, dynamic>;
+        final decoded = jsonDecode(
+          trimmed.substring(start, end + 1),
+        ) as Map<String, dynamic>;
         return decoded;
       }
       final direct = jsonDecode(trimmed);
@@ -357,12 +349,14 @@ class AgentSession {
       if (_epoch != epoch) return;
       if (text.isEmpty) return;
 
-      _events.add(AgentEvent({
-        'type': 'user_transcript',
-        'text': text,
-        'is_final': true,
-        'language': 'auto',
-      }));
+      _events.add(
+        AgentEvent({
+          'type': 'user_transcript',
+          'text': text,
+          'is_final': true,
+          'language': 'auto',
+        }),
+      );
       _history.add(ChatMessage('user', text));
 
       final messages = [..._history];
@@ -383,10 +377,7 @@ class AgentSession {
       // it — the user has moved on to a new utterance.
       if (_epoch != epoch) return;
       _history.add(ChatMessage('assistant', reply));
-      _events.add(AgentEvent({
-        'type': 'assistant_text',
-        'text': reply,
-      }));
+      _events.add(AgentEvent({'type': 'assistant_text', 'text': reply}));
 
       await _speak(reply);
     } catch (e) {
@@ -434,8 +425,9 @@ class AgentSession {
     var rounds = 0;
     while (toolCalls.isNotEmpty && rounds < maxToolRounds) {
       rounds++;
-      _history.add(ChatMessage('assistant', reply.content ?? '',
-          toolCalls: toolCalls));
+      _history.add(
+        ChatMessage('assistant', reply.content ?? '', toolCalls: toolCalls),
+      );
       for (final call in toolCalls) {
         String result;
         if (_toolExecutor == null) {
@@ -477,7 +469,9 @@ class AgentSession {
       const frameLen = 48000 * 2 ~/ 50; // 1920
       for (var i = 0; i + frameLen <= stereo.length; i += frameLen) {
         if (_interrupt) {
-          _events.add(AgentEvent({'type': 'agent_state', 'state': 'listening'}));
+          _events.add(
+            AgentEvent({'type': 'agent_state', 'state': 'listening'}),
+          );
           return;
         }
         _ttsOut.add(Int16List.sublistView(stereo, i, i + frameLen));
