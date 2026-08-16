@@ -14,12 +14,21 @@ import 'package:opus_codec_dart/opus_codec_dart.dart';
 import 'package:voice_forge/voice_forge.dart';
 
 void initOpusLibrary() {
-  for (final path in ['/opt/homebrew/opt/opus/lib/libopus.dylib']) {
+  final candidates = <String>[
+    '/opt/homebrew/opt/opus/lib/libopus.dylib',
+    '/opt/homebrew/lib/libopus.dylib',
+    '/usr/local/lib/libopus.dylib',
+    'libopus.dylib',
+    'libopus.so.0',
+    'opus.dll',
+  ];
+  for (final path in candidates) {
     try {
       initOpus(DynamicLibrary.open(path));
       return;
     } catch (_) {}
   }
+  throw StateError('libopus not found (install libopus or set the path)');
 }
 
 Future<void> main() async {
@@ -38,7 +47,16 @@ Future<void> main() async {
   print('sherpa-onnx ready (whisper=$whisperModel) in ${sw.elapsed.inSeconds}s');
 
   // --- STT + VAD ----------------------------------------------------------
-  final wave = File('$modelsDir/Obama.wav').readAsBytesSync();
+  final wavPath = '$modelsDir/Obama.wav';
+  if (!File(wavPath).existsSync()) {
+    print('downloading test audio (Obama.wav) ...');
+    await downloadFile(
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/'
+      'asr-models/Obama.wav',
+      wavPath,
+    );
+  }
+  final wave = File(wavPath).readAsBytesSync();
   final samples = Float32List((wave.length - 44) ~/ 2);
   for (var i = 0; i < samples.length; i++) {
     final offset = 44 + i * 2;

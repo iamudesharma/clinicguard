@@ -1,0 +1,115 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  # Dart/Flutter packages — analyze + unit tests via the melos workspace.
+  # (CI uses `melos exec` directly: `melos run` requires a TTY.)
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Bootstrap workspace
+        working-directory: voice_forge
+        run: |
+          dart pub get
+          dart run melos bootstrap
+
+      - name: Analyze all packages
+        working-directory: voice_forge
+        run: dart run melos exec --dir-exists=lib --concurrency=2 -- "dart analyze"
+
+      - name: Test Flutter packages
+        working-directory: voice_forge
+        run: dart run melos exec --flutter --dir-exists=test --concurrency=1 -- "flutter test"
+
+      - name: Test Dart packages
+        working-directory: voice_forge
+        run: dart run melos exec --no-flutter --dir-exists=test --concurrency=1 -- "dart test"
+
+  # Runtime verification — real WebRTC loopback + the full speech stack
+  # (VAD/STT/TTS). The speech check exercises the first-run auto-download of
+  # the native library and models (~170 MB, cached between runs).
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install libopus
+        run: sudo apt-get update && sudo apt-get install -y libopus0
+
+      - name: Cache sherpa native lib + models
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/voice_forge/native
+            voice_forge/models
+          key: sherpa-${{ runner.os }}-v1.13.5
+
+      - name: Resolve workspace
+        working-directory: voice_forge
+        run: dart pub get
+
+      - name: WebRTC transport loopback
+        working-directory: voice_forge/examples/poc_server
+        run: |
+          dart run bin/server.dart &
+          sleep 5
+          dart run bin/self_test.dart
+
+      - name: Speech stack (VAD/STT/TTS)
+        working-directory: voice_forge/examples/poc_server
+        run: dart run bin/speech_check.dart
+
+  # Flutter app — analyzer + widget tests.
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze + test app
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  # Python control plane — import check + API smoke test.
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false # post-step uv cache pruning is flaky on runners
+
+      - name: Sync + import check
+        working-directory: server
+        run: |
+          uv sync
+          uv run python -c "import api.main, config, store, plugins.whisper_stt, plugins.piper_tts, plugins.fallback_llm, triage.prompts, triage.tools, triage.summarizer"
+
+      - name: API smoke test
+        working-directory: server
+        run: |
+          uv run uvicorn api.main:app --host 127.0.0.1 --port 8000 &
+          sleep 8
+          curl -sf http://127.0.0.1:8000/health
+          curl -sf http://127.0.0.1:8000/slots >/dev/null

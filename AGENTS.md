@@ -4,6 +4,17 @@ ClinicGuard — free-tier voice AI clinical triage demo. `app/` (Flutter client)
 
 `voice_forge/` is a separate project inside this repo (branch `voice_forge`): a 100% Dart, LiveKit-free voice-agent framework. **The app now talks to the voice_forge ClinicGuard agent by default** (no LiveKit Cloud, no tokens). See `voice_forge/README.md` for status.
 
+## CI
+
+`.github/workflows/ci.yml` mirrors the mediaforge setup: melos workspace +
+GitHub Actions. 4 jobs on push/PR: `packages` (melos analyze + flutter/dart
+tests), `runtime` (WebRTC loopback + speech_check — exercises the first-run
+auto-download on Linux; models cached), `app` (flutter analyze/test), `server`
+(uv import check + health/slots smoke). Locally, the same gates are
+`dart run melos exec --dir-exists=lib -- "dart analyze"` etc. from
+`voice_forge/` (`melos run` needs a TTY; scripts `analyze`/`test`/`test:dart`/
+`verify` are for interactive use).
+
 ## voice_forge commands
 
 ```bash

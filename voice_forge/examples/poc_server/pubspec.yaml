@@ -1,4 +1,5 @@
 name: poc_server
+resolution: workspace
 description: >-
   voice_forge POC: pure-Dart WebRTC server (loopback transport test) + voice
   agent server (VAD/STT/LLM/TTS). Flutter/web client in ../poc_client.
@@ -12,8 +13,3 @@ dependencies:
   web_socket_channel: ^3.0.3
   voice_forge:
     path: ../../packages/voice_forge
-
-# Local override until voice_forge_speech is live on pub.dev (see PUBLISHING.md).
-dependency_overrides:
-  voice_forge_speech:
-    path: ../../packages/voice_forge_speech

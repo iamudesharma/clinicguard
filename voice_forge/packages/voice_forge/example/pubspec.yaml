@@ -1,4 +1,5 @@
 name: voice_forge_example
+resolution: workspace
 description: Minimal usage example for voice_forge.
 publish_to: none
 

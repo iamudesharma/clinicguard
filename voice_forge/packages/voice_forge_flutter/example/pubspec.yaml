@@ -1,4 +1,5 @@
 name: voice_forge_flutter_example
+resolution: workspace
 description: Minimal usage example for voice_forge_flutter.
 publish_to: none
 
