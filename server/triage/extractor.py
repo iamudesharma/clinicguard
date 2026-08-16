@@ -1,6 +1,6 @@
 """Pydantic AI based EHR extraction from triage conversations.
 
-Uses the LLM provider configured by ``LLM_BACKEND`` (groq | openrouter) via an
+Uses the LLM provider configured by ``LLM_BACKEND`` (groq | openrouter | gemini) via an
 OpenAI-compatible client, with a Pydantic output type for strict JSON extraction.
 """
 
@@ -11,6 +11,7 @@ import logging
 from openai import AsyncOpenAI
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from config import get_settings
 from triage.summarizer import TriageSummary
@@ -28,16 +29,28 @@ _SYSTEM_PROMPT = (
 def _build_model() -> OpenAIChatModel:
     s = get_settings()
     if s.llm_backend == "openrouter":
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=s.openrouter_api_key,
+        return OpenAIChatModel(
+            s.openrouter_model,
+            provider=OpenAIProvider(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=s.openrouter_api_key,
+            ),
         )
-        return OpenAIChatModel(s.openrouter_model, provider=client)
-    client = AsyncOpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=s.groq_api_key,
+    if s.llm_backend == "gemini":
+        return OpenAIChatModel(
+            s.gemini_model,
+            provider=OpenAIProvider(
+                base_url=s.gemini_base_url,
+                api_key=s.gemini_api_key,
+            ),
+        )
+    return OpenAIChatModel(
+        s.llm_model,
+        provider=OpenAIProvider(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=s.groq_api_key,
+        ),
     )
-    return OpenAIChatModel(s.llm_model, provider=client)
 
 
 def _dialogue_text(transcript: list[dict]) -> str:

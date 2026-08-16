@@ -16,7 +16,7 @@ binary.
 | Signaling    | `shelf` + `shelf_web_socket`                       |
 | Opus codec   | `opus_codec_dart` (libopus 1.5.2 FFI)              |
 | Speech stack | `sherpa-onnx` (vendored pure-Dart FFI): Silero VAD, Whisper tiny STT, Piper TTS |
-| LLM          | OpenAI-compatible HTTP (Groq/OpenAI/OpenRouter/...) or offline `EchoLlm` |
+| LLM          | OpenAI-compatible HTTP (Gemini/OpenCode Zen/OpenRouter/Groq/OpenAI/...) or offline `EchoLlm` |
 
 ## Status
 
@@ -27,6 +27,15 @@ binary.
 - [x] **ClinicGuard migration (Phase 4)** — the app talks to the voicepipe
       triage agent by default (see `examples/clinicguard_agent`); the Python
       FastAPI remains the control plane (patients, summaries, Supabase)
+- [x] **Tool calling (Phase 5)** — OpenAI-compatible function calling in the
+      LLM layer (`ToolDef` / `LlmToolCall` / `replyWithTools`): the ClinicGuard
+      agent can call `get_available_slots`, `book_appointment`, and
+      `search_knowledge` mid-conversation, with automatic fallback to plain
+      chat completions when the provider lacks tool support
+- [x] **RAG grounding (Phase 5)** — per-turn knowledge retrieval: the agent
+      POSTs the latest transcript to `{control-plane}/rag/search` (Supabase
+      pgvector via the FastAPI store) and injects the top-k chunks as one-shot
+      system context before every LLM call
 - [ ] Publish to pub.dev (packages are `publish_to: none` until the API settles)
 
 ## Phase 2 — verified

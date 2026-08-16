@@ -58,6 +58,16 @@ class VoiceCallController {
   bool _micEnabled = false;
   bool get micEnabled => _micEnabled;
 
+  /// The local microphone stream — lets the app tap the mic PCM for instant
+  /// local barge-in detection (web) without a second capture.
+  MediaStream? get localStream => _localStream;
+
+  bool _dcOpen = false;
+
+  /// True once the `agent.events` data channel is open — only then do
+  /// [send] messages actually reach the agent.
+  bool get dataChannelOpen => _dcOpen;
+
   bool _started = false;
   bool get isStarted => _started;
 
@@ -119,7 +129,8 @@ class VoiceCallController {
       _dc = dc;
       dc.onMessage = _onDataMessage;
       dc.stateChangeStream.listen((state) {
-        if (state == RTCDataChannelState.RTCDataChannelOpen) {
+        _dcOpen = state == RTCDataChannelState.RTCDataChannelOpen;
+        if (_dcOpen) {
           _startPingTimer();
         }
       });
@@ -241,6 +252,7 @@ class VoiceCallController {
     _localStream = null;
     await _dc?.close();
     _dc = null;
+    _dcOpen = false;
     await _pc?.close();
     _pc = null;
     await _ws?.sink.close();

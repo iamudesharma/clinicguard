@@ -1,6 +1,6 @@
 """EHR summary generation via Structured Outputs (JSON schema) + Pydantic.
 
-Uses the LLM provider configured by ``LLM_BACKEND`` (groq | openrouter), both
+Uses the LLM provider configured by ``LLM_BACKEND`` (groq | openrouter | opencode | gemini), all
 OpenAI-compatible, so a single client path covers them.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from typing import Literal
+from uuid import uuid4
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -34,12 +35,30 @@ class TriageSummary(BaseModel):
     notes: str = Field(default="", description="Free-text SOAP-style note for the clinician")
 
 
+# OpenCode Zen routes/validates requests by these client headers; without them
+# it answers FreeUsageLimitError even with a valid key (same as the Dart agent).
+def _opencode_headers() -> dict[str, str]:
+    return {
+        "x-opencode-client": "cli",
+        "x-opencode-session": uuid4().hex,
+        "x-opencode-project": uuid4().hex,
+        "x-opencode-request": uuid4().hex,
+        "User-Agent": "opencode/latest/cli",
+    }
+
+
 def _client() -> OpenAI:
     s = get_settings()
     if s.llm_backend == "openrouter":
         return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=s.openrouter_api_key)
     if s.llm_backend == "opencode":
-        return OpenAI(base_url=s.opencode_base_url, api_key=s.opencode_api_key)
+        return OpenAI(
+            base_url=s.opencode_base_url,
+            api_key=s.opencode_api_key,
+            default_headers=_opencode_headers(),
+        )
+    if s.llm_backend == "gemini":
+        return OpenAI(base_url=s.gemini_base_url, api_key=s.gemini_api_key)
     return OpenAI(base_url="https://api.groq.com/openai/v1", api_key=s.groq_api_key)
 
 
@@ -49,6 +68,8 @@ def _default_model() -> str:
         return s.openrouter_model
     if s.llm_backend == "opencode":
         return s.opencode_model
+    if s.llm_backend == "gemini":
+        return s.gemini_model
     return s.llm_model
 
 

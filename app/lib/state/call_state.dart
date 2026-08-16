@@ -6,6 +6,8 @@ import 'package:voicepipe_flutter/voicepipe_flutter.dart';
 
 import '../config.dart';
 import '../services/api_client.dart';
+import '../vad/barge_in_detector.dart';
+import '../vad/mic_tap.dart';
 
 enum CallPhase { idle, connecting, connected, error }
 
@@ -26,7 +28,9 @@ class TranscriptLine {
 /// Voice call state driven by [VoiceCallController] (voicepipe transport):
 /// microphone -> WebRTC -> voicepipe agent, with the `agent.events`
 /// data-channel contract (user_transcript / assistant_text / agent_state /
-/// summary). Barge-in is handled server-side by the agent's own VAD.
+/// summary). Barge-in is handled server-side by the agent's own VAD + onset
+/// gate; on web the app additionally taps the mic PCM and sends an instant
+/// `barge_in` the moment the user starts talking over the agent.
 class CallState extends ChangeNotifier {
   final ApiClient _api = ApiClient();
 
@@ -37,6 +41,25 @@ class CallState extends ChangeNotifier {
   StreamSubscription<VoiceCallPhase>? _phaseSub;
   RealtimeChannel? _ehrChannel;
   String? _roomId;
+  String? _pendingPatientId;
+  Timer? _patientIdTimer;
+
+  final MicTap _micTap = createMicTap();
+  bool _bargeInArmed = false;
+  late final BargeInDetector _bargeInDetector;
+
+  /// Live mic RMS level (0..1, web only; native stays 0). Drives the voice
+  /// orb's speaking animation without rebuilding the tree at audio rate.
+  final ValueNotifier<double> micLevel = ValueNotifier<double>(0);
+
+  CallState() {
+    _bargeInDetector = BargeInDetector(
+      rmsThreshold: AppConfig.bargeInRmsThreshold,
+      onSpeechStart: _onLocalSpeechStart,
+      onSpeechEnd: _onLocalSpeechEnd,
+      onAudioLevel: (level) => micLevel.value = level,
+    );
+  }
 
   @override
   void notifyListeners() {
@@ -52,13 +75,21 @@ class CallState extends ChangeNotifier {
   Map<String, dynamic>? get summary => _summary;
   bool micEnabled = false;
 
+  Map<String, dynamic>? booking;
+  String bookingError = '';
+  bool bookingInProgress = false;
+
   String get roomId => _roomId ?? '';
   bool get isConnected => phase == CallPhase.connected;
 
-  Future<void> startCall() async {
+  Future<void> startCall({String? patientId}) async {
     if (_call != null) return;
+    _pendingPatientId = patientId;
     phase = CallPhase.connecting;
     error = '';
+    booking = null;
+    bookingError = '';
+    bookingInProgress = false;
     notifyListeners();
 
     try {
@@ -84,6 +115,19 @@ class CallState extends ChangeNotifier {
       _eventsSub = call.events.listen(_onEvent);
 
       await call.start();
+      // Tap the mic PCM on web for instant barge-in; no-op elsewhere.
+      final local = call.localStream;
+      if (local != null) _micTap.start(local, _bargeInDetector);
+      // The data channel opens asynchronously after WebRTC negotiation;
+      // keep retrying until the patient id is actually delivered.
+      _patientIdTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
+        if (_pendingPatientId == null) {
+          _patientIdTimer?.cancel();
+          _patientIdTimer = null;
+        } else {
+          unawaited(_sendPatientId());
+        }
+      });
       micEnabled = true;
       _subscribeEhrRealtime();
       phase = CallPhase.connected;
@@ -98,9 +142,18 @@ class CallState extends ChangeNotifier {
   Future<void> endCall() async {
     final call = _call;
     _call = null;
-    _roomId = null;
+    _micTap.stop();
+    _bargeInArmed = false;
+    _bargeInDetector.reset();
+    _pendingPatientId = null;
+    _patientIdTimer?.cancel();
+    _patientIdTimer = null;
     phase = CallPhase.idle;
     _summary = null;
+    micLevel.value = 0;
+    booking = null;
+    bookingError = '';
+    bookingInProgress = false;
     notifyListeners();
     await _eventsSub?.cancel();
     _eventsSub = null;
@@ -155,10 +208,59 @@ class CallState extends ChangeNotifier {
     channel.subscribe();
   }
 
+  /// Books the given slot (label from GET /slots) for this session.
+  Future<bool> bookAppointment(String slotLabel) async {
+    final room = _roomId;
+    if (room == null || room.isEmpty) return false;
+    bookingInProgress = true;
+    bookingError = '';
+    notifyListeners();
+    try {
+      booking = await _api.createBooking(
+        slot: slotLabel,
+        roomId: room,
+        patientId: '',
+        name: (_summary?['patient_name'] ?? '').toString(),
+        reason: (_summary?['chief_complaint'] ?? '').toString(),
+      );
+      notifyListeners();
+      return true;
+    } catch (e) {
+      bookingError = '$e';
+      notifyListeners();
+      return false;
+    } finally {
+      bookingInProgress = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _sendPatientId() async {
+    final id = _pendingPatientId;
+    if (id == null) return;
+    if (_call?.dataChannelOpen != true) return; // channel not up yet — retried
+    _pendingPatientId = null;
+    await _call?.send({'event': 'patient_id', 'patient_id': id});
+  }
+
+  /// The user started talking while the agent was speaking: tell the agent
+  /// to stop right now (the interrupted utterance is picked up by its VAD
+  /// and still answered).
+  void _onLocalSpeechStart() {
+    if (!_bargeInArmed) return;
+    final call = _call;
+    if (call == null || !call.dataChannelOpen) return;
+    _bargeInArmed = false; // one shot until the next speaking turn
+    call.sendBargeIn();
+  }
+
+  void _onLocalSpeechEnd() {}
+
   void _onEvent(Map<String, dynamic> payload) {
     switch (payload['type']) {
       case 'connected':
         _roomId = payload['room'] as String?;
+        if (_pendingPatientId != null) unawaited(_sendPatientId());
         break;
       case 'user_transcript':
         transcript.add(TranscriptLine(
@@ -177,9 +279,17 @@ class CallState extends ChangeNotifier {
         break;
       case 'agent_state':
         agentState = payload['state'] as String? ?? 'idle';
+        // Arm the instant barge-in detector only while the agent speaks;
+        // its mic audio is our own TTS echo, so unarmed it would be noise.
+        _bargeInArmed = agentState == 'speaking';
+        _bargeInDetector.reset();
         break;
       case 'summary':
         _summary = payload['summary'] as Map<String, dynamic>?;
+        break;
+      case 'booking_confirmed':
+        booking = payload['booking'] as Map<String, dynamic>?;
+        bookingError = '';
         break;
     }
     notifyListeners();
@@ -188,9 +298,11 @@ class CallState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _patientIdTimer?.cancel();
     _eventsSub?.cancel();
     _phaseSub?.cancel();
     _call?.dispose();
+    micLevel.dispose();
     super.dispose();
   }
 }
