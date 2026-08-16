@@ -3,7 +3,7 @@ resolution: workspace
 description: >-
   Minimal voice-agent framework for Dart: WebRTC transport, speech
   (VAD/STT/TTS), LLM interface and the conversation loop — all pure Dart.
-version: 0.2.1
+version: 0.3.0
 repository: https://github.com/iamudesharma/clinicguard
 
 environment:
