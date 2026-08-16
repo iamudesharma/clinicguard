@@ -2,7 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:voicepipe/src/speech/resample.dart';
+import 'package:voice_forge/src/speech/resample.dart';
 
 void main() {
   test('downmix stereo to mono averages channels', () {

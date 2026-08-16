@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
-import 'package:voicepipe/src/llm/llm.dart';
-import 'package:voicepipe/src/session/agent_session.dart';
-import 'package:voicepipe/src/speech/interfaces.dart';
+import 'package:voice_forge/src/llm/llm.dart';
+import 'package:voice_forge/src/session/agent_session.dart';
+import 'package:voice_forge/src/speech/interfaces.dart';
 
 /// Scripted VAD: emits one segment per [pendingSegments] window(s).
 class _FakeVad implements VoicepipeVAD {

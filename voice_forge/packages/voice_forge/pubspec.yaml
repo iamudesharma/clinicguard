@@ -1,11 +1,10 @@
-name: voicepipe
+name: voice_forge
 description: >-
   Minimal open-source voice-agent framework for Dart. Server-side WebRTC
   transport, signaling, speech (sherpa-onnx: VAD/STT/TTS), LLM interface,
   and the conversation loop — all pure Dart, <300 MB.
 version: 0.2.0
-repository: https://github.com/example/voicepipe # TODO: set real repo
-publish_to: none # TODO: publish to pub.dev when API is stable
+repository: https://github.com/example/voice_forge # TODO: set real repo
 
 environment:
   sdk: ^3.13.0
@@ -15,11 +14,23 @@ dependencies:
   opus_codec_dart: ^3.0.5
   shelf: ^1.4.0
   shelf_web_socket: ^3.0.0
+  voice_forge_speech: ^1.13.5
   web_socket_channel: ^3.0.3
   webrtc_dart: ^0.25.3
-  sherpa_onnx:
-    path: ../../third_party/sherpa_onnx
+
+# Local path override only — voice_forge_speech is published separately;
+# drop this override once it is live on pub.dev (see PUBLISHING.md).
+dependency_overrides:
+  voice_forge_speech:
+    path: ../voice_forge_speech
 
 dev_dependencies:
   lints: ^6.0.0
   test: ^1.31.2
+
+topics:
+  - voice
+  - webrtc
+  - speech
+  - llm
+  - audio

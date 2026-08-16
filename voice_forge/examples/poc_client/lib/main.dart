@@ -1,6 +1,6 @@
-/// voicepipe POC client — built on the voicepipe_flutter package.
+/// voice_forge POC client — built on the voice_forge_flutter package.
 ///
-/// Connects to a voicepipe server (loopback `server.dart` or the full
+/// Connects to a voice_forge server (loopback `server.dart` or the full
 /// `agent_server.dart`), sends the real microphone, plays the agent audio,
 /// and shows the data-channel event log + RTT.
 ///
@@ -12,7 +12,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:voicepipe_flutter/voicepipe_flutter.dart';
+import 'package:voice_forge_flutter/voice_forge_flutter.dart';
 
 const _defaultServer = 'ws://127.0.0.1:8765/signal';
 
@@ -24,7 +24,7 @@ class PocClientApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'voicepipe POC client',
+      title: 'voice_forge POC client',
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       home: const CallScreen(),
     );
@@ -119,7 +119,7 @@ class _CallScreenState extends State<CallScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('voicepipe POC — client')),
+      appBar: AppBar(title: const Text('voice_forge POC — client')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

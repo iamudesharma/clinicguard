@@ -399,6 +399,42 @@ class Store:
         else:
             patients = {p.get("id", ""): p for p in self._memory.get("patients", [])}
 
+        # Count transcripts + bookings per room in two batched queries instead
+        # of one round trip per session row (N+1 made /sessions time out with
+        # more than a handful of sessions).
+        room_ids = list({r.get("room_id", "") for r in rows if r.get("room_id")})
+        transcript_counts: dict[str, int] = {}
+        booking_counts: dict[str, int] = {}
+        if t is not None:
+            for i in range(0, len(room_ids), 100):
+                chunk = room_ids[i : i + 100]
+                try:
+                    res = await asyncio.to_thread(
+                        self._table("transcripts").select("room_id").in_, "room_id", chunk
+                    )
+                    for row in res.execute().data:
+                        rid = row.get("room_id", "")
+                        transcript_counts[rid] = transcript_counts.get(rid, 0) + 1
+                except Exception:
+                    pass
+                try:
+                    res = await asyncio.to_thread(
+                        self._table("bookings").select("room_id").in_, "room_id", chunk
+                    )
+                    for row in res.execute().data:
+                        rid = row.get("room_id", "")
+                        booking_counts[rid] = booking_counts.get(rid, 0) + 1
+                except Exception:
+                    pass
+        else:
+            for rid in room_ids:
+                transcript_counts[rid] = len(
+                    self._memory.get(f"transcripts:{rid}", [])
+                )
+                booking_counts[rid] = len(
+                    [b for b in self._bookings if b.get("room_id") == rid]
+                )
+
         if owner_id and not owner_filtered:
             rows = [
                 r
@@ -414,19 +450,6 @@ class Store:
             created = r.get("created_at")
             if isinstance(created, (int, float)):
                 created = datetime.fromtimestamp(float(created)).isoformat()
-            if t is not None:
-                try:
-                    res = await asyncio.to_thread(
-                        lambda: self._table("transcripts")
-                        .select("id")
-                        .eq("room_id", room_id)
-                        .execute()
-                    )
-                    transcript_count = len(res.data)
-                except Exception:
-                    transcript_count = 0
-            else:
-                transcript_count = len(self._memory.get(f"transcripts:{room_id}", []))
             out.append(
                 {
                     "room_id": room_id,
@@ -434,8 +457,8 @@ class Store:
                     "patient_name": patients.get(pid, {}).get("name", ""),
                     "status": r.get("status", ""),
                     "created_at": created or "",
-                    "transcript_count": transcript_count,
-                    "booking_count": len(await self.list_bookings(room_id)),
+                    "transcript_count": transcript_counts.get(room_id, 0),
+                    "booking_count": booking_counts.get(room_id, 0),
                 }
             )
 

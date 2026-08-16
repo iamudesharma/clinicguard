@@ -1,6 +1,6 @@
 name: clinicguard_agent
 description: >-
-  ClinicGuard voice agent on voicepipe: triage prompt, greeting, transcript
+  ClinicGuard voice agent on voice_forge: triage prompt, greeting, transcript
   persistence to the Python FastAPI control plane, and a summary event at
   call end. The LiveKit-free replacement for server/agent.py.
 publish_to: none
@@ -11,5 +11,10 @@ environment:
 dependencies:
   http: ^1.2.0
   opus_codec_dart: ^3.0.5
-  voicepipe:
-    path: ../../packages/voicepipe
+  voice_forge:
+    path: ../../packages/voice_forge
+
+# Local override until voice_forge_speech is live on pub.dev (see PUBLISHING.md).
+dependency_overrides:
+  voice_forge_speech:
+    path: ../../packages/voice_forge_speech

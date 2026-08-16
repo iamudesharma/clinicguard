@@ -1,4 +1,4 @@
-/// ClinicGuard voice agent on voicepipe (LiveKit-free).
+/// ClinicGuard voice agent on voice_forge (LiveKit-free).
 ///
 /// Replaces the LiveKit `server/agent.py` voice path:
 ///   - triage system prompt (en + hi), one question at a time
@@ -11,7 +11,7 @@
 /// Run (from examples/clinicguard_agent):
 ///   dart run bin/agent.dart
 /// Env: GROQ_API_KEY/OPENAI_API_KEY, API_BASE_URL (default
-///      http://127.0.0.1:8000), VOICEPIPE_WHISPER_MODEL (tiny|base).
+///      http://127.0.0.1:8000), VOICE_FORGE_WHISPER_MODEL (tiny|base).
 library;
 
 import 'dart:async';
@@ -23,7 +23,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:opus_codec_dart/opus_codec_dart.dart';
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
 const _modelsDir = '../../models';
 const _defaultApiBase = 'http://127.0.0.1:8000';
@@ -626,7 +626,7 @@ Future<void> main() async {
   initOpusLibrary();
 
   final env = Platform.environment;
-  final whisperModel = env['VOICEPIPE_WHISPER_MODEL'] ?? 'tiny';
+  final whisperModel = env['VOICE_FORGE_WHISPER_MODEL'] ?? 'tiny';
   final apiBase = env['API_BASE_URL'] ?? _defaultApiBase;
   safeLog('loading sherpa-onnx (whisper=$whisperModel) ...');
   final sw = Stopwatch()..start();

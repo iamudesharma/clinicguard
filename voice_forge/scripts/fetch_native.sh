@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Downloads the prebuilt sherpa-onnx native library for the current platform.
-# Run from voicepipe/. Output: third_party/native/<os-arch>/libsherpa-onnx-c-api.dylib
+# Run from voice_forge/. Output: third_party/native/<os-arch>/libsherpa-onnx-c-api.dylib
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

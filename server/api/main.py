@@ -220,7 +220,7 @@ class TranscriptAppend(BaseModel):
 
 @app.post("/sessions/{room_id}/transcripts")
 async def append_transcript(room_id: str, data: TranscriptAppend) -> dict:
-    """Transcript persistence for the voicepipe (LiveKit-free) agent path."""
+    """Transcript persistence for the voice_forge (LiveKit-free) agent path."""
     if data.role not in ("user", "assistant"):
         raise HTTPException(422, "role must be user or assistant")
     await get_store().append_transcript(
@@ -236,7 +236,7 @@ class SessionUpdate(BaseModel):
 
 @app.put("/sessions/{room_id}")
 async def update_session(room_id: str, data: SessionUpdate) -> dict:
-    """Link a session to a patient and/or mark it ended (voicepipe agent bridge)."""
+    """Link a session to a patient and/or mark it ended (voice_forge agent bridge)."""
     await get_store().update_session(room_id, **{k: v for k, v in data.model_dump().items() if v})
     return {"status": "ok"}
 

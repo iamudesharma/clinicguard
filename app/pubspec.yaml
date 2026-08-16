@@ -13,8 +13,8 @@ dependencies:
   http: ^1.6.0
   provider: ^6.1.5+1
   supabase_flutter: ^2.17.2
-  voicepipe_flutter:
-    path: ../voicepipe/packages/voicepipe_flutter
+  voice_forge_flutter:
+    path: ../voice_forge/packages/voice_forge_flutter
   web: ^1.0.0
 
 dev_dependencies:

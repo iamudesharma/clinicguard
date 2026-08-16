@@ -48,7 +48,7 @@ class PeerSession {
   int _ts = 0;
   int _sendSsrc = 0x50111AAA;
   bool _ssrcKnown = false;
-  final bool _debugRtp = Platform.environment['VOICEPIPE_DEBUG_RTP'] == '1';
+  final bool _debugRtp = Platform.environment['VOICE_FORGE_DEBUG_RTP'] == '1';
   int _sentLogged = 0;
 
   /// Extract the audio SSRC from our local answer SDP (the value Chrome's
@@ -260,7 +260,7 @@ class PeerSession {
     void onChannelOpen() {
       dc.sendString(jsonEncode({
         'type': 'hello',
-        'text': 'voicepipe agent ready',
+        'text': 'voice_forge agent ready',
       }));
       if (dc.label == 'agent.events') {
         // Flush events queued before the channel opened, then start the core.
@@ -326,9 +326,9 @@ class PeerSession {
         _flushPendingFrames();
         print('[peer$_id] answered offer (${sdp.length} bytes)');
         if (_debugRtp) {
-          File('/tmp/voicepipe_offer_$_id.sdp').writeAsStringSync(sdp);
-          File('/tmp/voicepipe_answer_$_id.sdp').writeAsStringSync(answer.sdp);
-          print('[peer$_id] SDP dumped to /tmp/voicepipe_{offer,answer}_$_id.sdp');
+          File('/tmp/voice_forge_offer_$_id.sdp').writeAsStringSync(sdp);
+          File('/tmp/voice_forge_answer_$_id.sdp').writeAsStringSync(answer.sdp);
+          print('[peer$_id] SDP dumped to /tmp/voice_forge_{offer,answer}_$_id.sdp');
         }
       case 'candidate':
         final c = msg['candidate'] as Map<String, dynamic>;

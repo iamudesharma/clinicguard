@@ -1,4 +1,4 @@
-/// voicepipe Phase 1 transport POC — Dart WebRTC server (loopback).
+/// voice_forge Phase 1 transport POC — Dart WebRTC server (loopback).
 ///
 /// Accepts a Flutter client's offer over WebSocket (/signal), decodes the
 /// client's Opus audio to raw PCM with libopus (opus_codec_dart), re-encodes
@@ -15,7 +15,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:opus_codec_dart/opus_codec_dart.dart';
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
 import 'loopback_core.dart';
 

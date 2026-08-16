@@ -205,7 +205,7 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
         ));
       }
     }
-    _safeLog('[voicepipe] llm: $name -> ${sw.elapsedMilliseconds}ms '
+    _safeLog('[voice_forge] llm: $name -> ${sw.elapsedMilliseconds}ms '
         '(${toolCalls.length} tool call(s), ${history.length} messages)');
     return LlmReply(
       content: content is String && content.isNotEmpty ? content.trim() : null,
@@ -303,13 +303,13 @@ class FallbackLlm implements VoicepipeLlm {
     } catch (e) {
       sw.stop();
       _consecutiveFailures++;
-      _safeLog('[voicepipe] LLM call failed after ${sw.elapsedMilliseconds}ms: $e');
+      _safeLog('[voice_forge] LLM call failed after ${sw.elapsedMilliseconds}ms: $e');
       final rateLimited = _rateLimit.hasMatch('$e');
       if (rateLimited && _consecutiveFailures < 2) {
         // Transient burst quota (e.g. Google's 429s recover in seconds):
         // retry the primary once before treating it as exhausted. A second
         // consecutive 429 falls through to the existing mark-down logic.
-        _safeLog('[voicepipe] LLM 429 (transient?), retrying primary...');
+        _safeLog('[voice_forge] LLM 429 (transient?), retrying primary...');
         await Future<void>.delayed(const Duration(milliseconds: 1500));
         return _run(call, onFallback);
       }
@@ -325,7 +325,7 @@ class FallbackLlm implements VoicepipeLlm {
           _primaryDownUntil = DateTime.now().add(cooldown);
         }
         _consecutiveFailures = 0;
-        _safeLog('[voicepipe] LLM provider down after ${sw.elapsedMilliseconds}ms'
+        _safeLog('[voice_forge] LLM provider down after ${sw.elapsedMilliseconds}ms'
             '${rateLimited ? ' (rate limited)' : ''}; switching to fallback '
             'for ${(rateLimited ? _rateLimitCooldown ~/ 2 : cooldown).inSeconds}s');
       }
@@ -355,7 +355,7 @@ VoicepipeLlm _openAiCompatible(Map<String, String> env, String base,
     String key, String model,
     {double temperature = 0.3}) {
   final timeoutSeconds =
-      int.tryParse(env['VOICEPIPE_LLM_TIMEOUT_SECONDS'] ?? '') ?? 45;
+      int.tryParse(env['VOICE_FORGE_LLM_TIMEOUT_SECONDS'] ?? '') ?? 45;
   return OpenAiCompatibleLlm(
     baseUrl: base,
     apiKey: key,
@@ -367,7 +367,7 @@ VoicepipeLlm _openAiCompatible(Map<String, String> env, String base,
 
 /// Build the agent's LLM from environment variables.
 ///
-/// Default provider order (unless the explicit `VOICEPIPE_LLM_*` trio is set):
+/// Default provider order (unless the explicit `VOICE_FORGE_LLM_*` trio is set):
 ///   1. Cline (`CLINE_API_KEY`, `CLINE_MODEL`, default
 ///      `poolside/laguna-s-2.1:free`, base https://api.cline.bot/api/v1);
 ///   2. OpenCode Zen (`OPENCODE_API_KEY`, `OPENCODE_BASE_URL`, `OPENCODE_MODEL`),
@@ -382,18 +382,18 @@ VoicepipeLlm _openAiCompatible(Map<String, String> env, String base,
 ///      fallback when the primary fails;
 ///   6. Groq / OpenAI if present (last resort fallback chain);
 ///   7. [EchoLlm] when no key is configured (offline demo mode).
-/// `VOICEPIPE_LLM_TIMEOUT_SECONDS` (default 45) raises the per-call timeout —
+/// `VOICE_FORGE_LLM_TIMEOUT_SECONDS` (default 45) raises the per-call timeout —
 /// needed for slow free-tier providers (e.g. OpenRouter `:free` models).
 VoicepipeLlm llmFromEnv(Map<String, String> env) {
-  final explicit = env['VOICEPIPE_LLM_API_KEY'] != null;
+  final explicit = env['VOICE_FORGE_LLM_API_KEY'] != null;
   if (explicit) {
-    final base = env['VOICEPIPE_LLM_BASE_URL'] ?? '';
+    final base = env['VOICE_FORGE_LLM_BASE_URL'] ?? '';
     if (base.isEmpty) return EchoLlm();
     return _openAiCompatible(
       env,
       base,
-      env['VOICEPIPE_LLM_API_KEY'] ?? '',
-      env['VOICEPIPE_LLM_MODEL'] ?? '',
+      env['VOICE_FORGE_LLM_API_KEY'] ?? '',
+      env['VOICE_FORGE_LLM_MODEL'] ?? '',
     );
   }
   final opencodeKey = env['OPENCODE_API_KEY'];

@@ -7,7 +7,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
 const _systemPrompt = '''
 You are "ClinicGuard", a multilingual clinical triage dispatcher for a

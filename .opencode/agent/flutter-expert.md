@@ -29,4 +29,4 @@ You are the ClinicGuard Flutter app expert. All knowledge below is mandatory con
 
 ## Contract mirror
 
-`app/lib/state/call_state.dart` and `server/agent.py` (and voicepipe) must stay in sync on topic `agent.events`. Client sends `{"event":"barge_in"}`. See the `data-channel-contract` skill for the canonical event table.
+`app/lib/state/call_state.dart` and `server/agent.py` (and voice_forge) must stay in sync on topic `agent.events`. Client sends `{"event":"barge_in"}`. See the `data-channel-contract` skill for the canonical event table.

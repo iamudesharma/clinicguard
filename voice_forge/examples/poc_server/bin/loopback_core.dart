@@ -5,7 +5,7 @@ library;
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
 class LoopbackCore implements AudioCore {
   final _out = StreamController<Int16List>();

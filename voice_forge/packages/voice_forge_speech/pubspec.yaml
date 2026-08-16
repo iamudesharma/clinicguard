@@ -1,10 +1,11 @@
-name: sherpa_onnx
-description: >
-  Vendored pure-Dart core of sherpa-onnx (Apache-2.0, k2-fsa) for server-side
-  use in voicepipe. Stripped of the Flutter plugin + platform packages: the
-  native libsherpa-onnx-c-api library is loaded by the host process.
-  Upstream: https://github.com/k2-fsa/sherpa-onnx/tree/master/flutter/sherpa_onnx
+name: voice_forge_speech
+description: >-
+  Pure-Dart FFI bindings for sherpa-onnx (k2-fsa): Silero VAD, Whisper and
+  other ASR, Piper TTS, speaker ID, and more. Flutter-free, server-side
+  build of the official sherpa_onnx Dart package (Apache-2.0) with a small
+  patch that lets the host process inject the loaded native library.
 version: 1.13.5
+repository: https://github.com/example/voice_forge # TODO: set real repo
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -12,5 +13,9 @@ environment:
 dependencies:
   ffi: ^2.1.0
 
-# DO NOT publish. This is a vendored copy for voicepipe.
-publish_to: none
+topics:
+  - speech
+  - asr
+  - tts
+  - vad
+  - audio

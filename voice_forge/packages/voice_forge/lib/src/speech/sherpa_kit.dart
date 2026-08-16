@@ -1,4 +1,4 @@
-/// sherpa-onnx speech implementations of the voicepipe interfaces.
+/// sherpa-onnx speech implementations of the voice_forge interfaces.
 ///
 /// The native `libsherpa-onnx-c-api` library must be loadable by the host
 /// process (see `scripts/fetch_native.sh`); [SherpaKit.loadNative] resolves
@@ -9,7 +9,7 @@ import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
+import 'package:voice_forge_speech/voice_forge_speech.dart' as sherpa;
 
 import 'interfaces.dart';
 

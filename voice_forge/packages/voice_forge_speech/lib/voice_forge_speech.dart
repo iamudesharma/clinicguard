@@ -1,14 +1,13 @@
 // Copyright (c)  2024  Xiaomi Corporation
-// Vendored for voicepipe: Flutter-free build (kIsWeb is always false here).
-import 'src/init_native.dart'
-    if (dart.library.js_interop) 'src/web/init.dart' as init;
+// Vendored for voice_forge: Flutter-free, web-free build (server-side only).
 
-// Vendored for voicepipe: allow the host to inject the loaded library handle.
+// Conditional import: native uses dart:io/dart:ffi, web uses dart:js_interop.
+import 'src/init_native.dart' as init;
+
+// Vendored for voice_forge: allow the host to inject the loaded library handle.
 export 'src/init_native.dart' show setSherpaLibrary;
 
 // Conditional import for web WASM loader.
-import 'package:sherpa_onnx_web/sherpa_onnx_web.dart'
-    if (dart.library.io) 'src/init_stub.dart' as web;
 
 /// Dart bindings for the public sherpa-onnx inference APIs.
 ///
@@ -34,60 +33,39 @@ import 'package:sherpa_onnx_web/sherpa_onnx_web.dart'
 /// - `speaker-diarization/`
 
 export 'src/audio_tagging_config.dart';
-export 'src/audio_tagging.dart'
-    if (dart.library.js_interop) 'src/web/audio_tagging.dart';
+export 'src/audio_tagging.dart';
 export 'src/feature_config.dart';
 export 'src/homophone_replacer_config.dart';
 export 'src/keyword_spotter_config.dart';
-export 'src/keyword_spotter.dart'
-    if (dart.library.js_interop) 'src/web/keyword_spotter.dart';
+export 'src/keyword_spotter.dart';
 export 'src/offline_punctuation_config.dart';
-export 'src/offline_punctuation.dart'
-    if (dart.library.js_interop) 'src/web/offline_punctuation.dart';
+export 'src/offline_punctuation.dart';
 export 'src/offline_recognizer_config.dart';
-export 'src/offline_recognizer.dart'
-    if (dart.library.js_interop) 'src/web/offline_recognizer.dart';
+export 'src/offline_recognizer.dart';
 export 'src/offline_speaker_diarization_config.dart';
-export 'src/offline_speaker_diarization.dart'
-    if (dart.library.js_interop) 'src/web/offline_speaker_diarization.dart';
+export 'src/offline_speaker_diarization.dart';
 export 'src/offline_speech_denoiser_config.dart';
-export 'src/offline_speech_denoiser.dart'
-    if (dart.library.js_interop) 'src/web/offline_speech_denoiser.dart';
-export 'src/offline_stream.dart'
-    if (dart.library.js_interop) 'src/web/offline_stream.dart';
+export 'src/offline_speech_denoiser.dart';
+export 'src/offline_stream.dart';
 export 'src/online_speech_denoiser_config.dart';
-export 'src/online_speech_denoiser.dart'
-    if (dart.library.js_interop) 'src/web/online_speech_denoiser.dart';
+export 'src/online_speech_denoiser.dart';
 export 'src/online_punctuation_config.dart';
-export 'src/online_punctuation.dart'
-    if (dart.library.js_interop) 'src/web/online_punctuation.dart';
+export 'src/online_punctuation.dart';
 export 'src/online_recognizer_config.dart';
-export 'src/online_recognizer.dart'
-    if (dart.library.js_interop) 'src/web/online_recognizer.dart';
-export 'src/online_stream.dart'
-    if (dart.library.js_interop) 'src/web/online_stream.dart';
+export 'src/online_recognizer.dart';
+export 'src/online_stream.dart';
 export 'src/speaker_identification_config.dart';
-export 'src/speaker_identification.dart'
-    if (dart.library.js_interop) 'src/web/speaker_identification.dart';
+export 'src/speaker_identification.dart';
 export 'src/spoken_language_identification_config.dart';
-export 'src/spoken_language_identification.dart'
-    if (dart.library.js_interop) 'src/web/spoken_language_identification.dart';
+export 'src/spoken_language_identification.dart';
 export 'src/tts_config.dart';
-export 'src/tts.dart'
-    if (dart.library.js_interop) 'src/web/tts.dart';
+export 'src/tts.dart';
 export 'src/vad_config.dart';
-export 'src/vad.dart'
-    if (dart.library.js_interop) 'src/web/vad.dart';
-export 'src/version.dart'
-    if (dart.library.js_interop) 'src/web/version.dart';
+export 'src/vad.dart';
+export 'src/version.dart';
 export 'src/wave_reader_config.dart';
-export 'src/wave_reader.dart'
-    if (dart.library.js_interop) 'src/web/wave_reader.dart';
-export 'src/wave_writer.dart'
-    if (dart.library.js_interop) 'src/web/wave_writer.dart';
-
-// Vendored for voicepipe: Flutter-free build (kIsWeb is always false here).
-const bool kIsWeb = false;
+export 'src/wave_reader.dart';
+export 'src/wave_writer.dart';
 
 String? _path;
 
@@ -102,12 +80,6 @@ String? _path;
 /// On web, use [initBindingsAsync] instead. This method throws
 /// [UnsupportedError] on web.
 void initBindings([String? p]) {
-  if (kIsWeb) {
-    throw UnsupportedError(
-      'initBindings() is not supported on web. '
-      'Use initBindingsAsync() instead.',
-    );
-  }
   _path ??= p;
   init.initNativeBindings(_path);
 }
@@ -122,9 +94,5 @@ void initBindings([String? p]) {
 /// See [initBindings] for details.
 Future<void> initBindingsAsync([String? p]) async {
   _path ??= p;
-  if (kIsWeb) {
-    await web.SherpaOnnxWeb.loadWasm();
-    return;
-  }
   init.initNativeBindings(_path);
 }

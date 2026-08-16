@@ -1,4 +1,4 @@
-/// voicepipe Phase 2 agent self-test: full loop over WebRTC.
+/// voice_forge Phase 2 agent self-test: full loop over WebRTC.
 ///
 /// Connects to `bin/agent_server.dart` as a WebRTC peer, streams the first
 /// seconds of Obama.wav as "patient speech" (48k stereo, real-time paced),
@@ -42,7 +42,7 @@ void initOpusLibrary() {
 
 void main() async {
   initOpusLibrary();
-  stdout.writeln('=== voicepipe agent self-test ===');
+  stdout.writeln('=== voice_forge agent self-test ===');
 
   final ws = WebSocketChannel.connect(Uri.parse(_serverUrl));
   final pc = RTCPeerConnection(RtcConfiguration(

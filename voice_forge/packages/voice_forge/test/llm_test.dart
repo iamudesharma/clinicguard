@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:voicepipe/src/llm/llm.dart';
+import 'package:voice_forge/src/llm/llm.dart';
 
 void main() {
   test('EchoLlm returns its fixed reply', () async {
@@ -273,7 +273,7 @@ void main() {
   test('llmFromEnv falls back to EchoLlm without keys', () {
     expect(llmFromEnv(const {}), isA<EchoLlm>());
     expect(
-        llmFromEnv(const {'VOICEPIPE_LLM_API_KEY': 'k'}), isA<EchoLlm>());
+        llmFromEnv(const {'VOICE_FORGE_LLM_API_KEY': 'k'}), isA<EchoLlm>());
   });
 
   test('llmFromEnv uses Cline first, then OpenCode Zen, then OpenCode Go', () {

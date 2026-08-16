@@ -11,7 +11,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:opus_codec_dart/opus_codec_dart.dart';
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
 void initOpusLibrary() {
   for (final path in ['/opt/homebrew/opt/opus/lib/libopus.dylib']) {
@@ -26,7 +26,7 @@ void main() {
   initOpusLibrary();
 
   const modelsDir = '../../models';
-  final whisperModel = Platform.environment['VOICEPIPE_WHISPER_MODEL'] ?? 'tiny';
+  final whisperModel = Platform.environment['VOICE_FORGE_WHISPER_MODEL'] ?? 'tiny';
 
   final sw = Stopwatch()..start();
   final kit = SherpaKit.load(
@@ -69,7 +69,7 @@ void main() {
   print('STT: ${segments.length} segments in ${ssw.elapsed.inSeconds}s');
 
   // --- TTS ----------------------------------------------------------------
-  final audio = tts.synthesize('Hello, I am your voicepipe agent.');
+  final audio = tts.synthesize('Hello, I am your voice_forge agent.');
   final rms = audio.samples.isEmpty
       ? 0.0
       : sqrt(audio.samples.map((s) => s * s).reduce((a, b) => a + b) /

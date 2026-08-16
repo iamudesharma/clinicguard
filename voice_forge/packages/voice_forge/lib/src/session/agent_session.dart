@@ -194,7 +194,7 @@ class AgentSession {
       ]);
       return _extractJson(reply);
     } catch (e) {
-      _safeLog('[voicepipe] summary generation error: $e');
+      _safeLog('[voice_forge] summary generation error: $e');
       return null;
     }
   }
@@ -216,7 +216,7 @@ class AgentSession {
       ]);
       return _extractJson(reply);
     } catch (e) {
-      _safeLog('[voicepipe] structured ask error: $e');
+      _safeLog('[voice_forge] structured ask error: $e');
       return null;
     }
   }
@@ -374,7 +374,7 @@ class AgentSession {
             messages.add(ChatMessage('system', ctx));
           }
         } catch (e, st) {
-          _safeLog('[voicepipe] knowledge retrieval error: $e\n$st');
+          _safeLog('[voice_forge] knowledge retrieval error: $e\n$st');
         }
       }
 
@@ -411,7 +411,7 @@ class AgentSession {
     // whisper tiny int8 transcribes ~10s of audio in well under a second.
     final sw = Stopwatch()..start();
     final text = await _stt.transcribe(segment);
-    _safeLog('[voicepipe] stt: ${sw.elapsedMilliseconds}ms');
+    _safeLog('[voice_forge] stt: ${sw.elapsedMilliseconds}ms');
     return text;
   }
 

@@ -1,9 +1,9 @@
-/// One voice call to a voicepipe agent server.
+/// One voice call to a voice_forge agent server.
 ///
 /// Wraps flutter_webrtc + WebSocket signaling:
 ///  - microphone -> RTCPeerConnection (Opus)
 ///  - agent audio plays automatically on the remote track
-///  - data channel `agent.events` carries the voicepipe event contract
+///  - data channel `agent.events` carries the voice_forge event contract
 ///    (`user_transcript`, `assistant_text`, `agent_state`, ...) plus
 ///    ping/pong RTT probes
 ///  - `sendBargeIn()` sends {"event":"barge_in"} for instant interrupts
@@ -49,7 +49,7 @@ class VoiceCallController {
   /// Call lifecycle (idle -> connecting -> connected / error).
   Stream<VoiceCallPhase> get phase => _phase.stream;
 
-  /// Parsed data-channel messages (the voicepipe event contract).
+  /// Parsed data-channel messages (the voice_forge event contract).
   Stream<Map<String, dynamic>> get events => _events.stream;
 
   /// Measured data-channel round-trip times (ms), one per ping.
@@ -118,7 +118,7 @@ class VoiceCallController {
         if (stream != null && stream.getAudioTracks().isNotEmpty) {
           _remoteRenderer ??= RTCVideoRenderer();
           _remoteRenderer!.srcObject = stream;
-          debugPrint('[voicepipe] remote audio attached to renderer');
+          debugPrint('[voice_forge] remote audio attached to renderer');
         }
       };
 
@@ -139,7 +139,7 @@ class VoiceCallController {
       final ws = WebSocketChannel.connect(Uri.parse(signalingUrl));
       _ws = ws;
       ws.stream.listen(_onSignal, onError: (e) {
-        debugPrint('[voicepipe] signaling error: $e');
+        debugPrint('[voice_forge] signaling error: $e');
         _phase.add(VoiceCallPhase.error);
       }, onDone: () {
         if (_started) _phase.add(VoiceCallPhase.error);
@@ -160,7 +160,7 @@ class VoiceCallController {
     _signalChain = _signalChain
         .then((_) => _handleSignal(raw))
         .catchError((Object e) {
-      debugPrint('[voicepipe] signaling error: $e');
+      debugPrint('[voice_forge] signaling error: $e');
     });
   }
 
@@ -185,7 +185,7 @@ class VoiceCallController {
             c['sdpMLineIndex'] as int?,
           ));
         } catch (e) {
-          debugPrint('[voicepipe] addCandidate skipped: $e');
+          debugPrint('[voice_forge] addCandidate skipped: $e');
         }
       default:
         _events.add(msg); // connected / hello / other server pushes

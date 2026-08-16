@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:voicepipe_flutter/voicepipe_flutter.dart';
+import 'package:voice_forge_flutter/voice_forge_flutter.dart';
 
 void main() {
   test('VoiceCallController builds with a signaling URL', () {
@@ -14,7 +14,7 @@ void main() {
     expect(call.dataChannelLabel, 'agent.events');
   });
 
-  test('barge-in payload matches the voicepipe contract', () {
+  test('barge-in payload matches the voice_forge contract', () {
     // The controller sends {"event":"barge_in"} on the data channel; verify
     // the contract string is what the server expects.
     final payload = jsonEncode({'event': 'barge_in'});

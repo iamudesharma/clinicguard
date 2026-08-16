@@ -1,4 +1,4 @@
-/// voicepipe Phase 2 agent server: real voice agent over WebRTC.
+/// voice_forge Phase 2 agent server: real voice agent over WebRTC.
 ///
 ///   Flutter/web client --WebRTC--> webrtc_dart --Opus decode--> AgentSession
 ///                                     ^                         |
@@ -15,8 +15,8 @@
 /// Run (models + native lib must be present; see scripts/):
 ///   dart run bin/agent_server.dart
 ///
-/// Env: GROQ_API_KEY / OPENAI_API_KEY (or VOICEPIPE_LLM_*), and
-///      VOICEPIPE_WHISPER_MODEL=tiny|base (default tiny).
+/// Env: GROQ_API_KEY / OPENAI_API_KEY (or VOICE_FORGE_LLM_*), and
+///      VOICE_FORGE_WHISPER_MODEL=tiny|base (default tiny).
 library;
 
 import 'dart:async';
@@ -25,9 +25,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:opus_codec_dart/opus_codec_dart.dart';
-import 'package:voicepipe/voicepipe.dart';
+import 'package:voice_forge/voice_forge.dart';
 
-// Models live in the voicepipe repo root (run from examples/poc_server).
+// Models live in the voice_forge repo root (run from examples/poc_server).
 const _modelsDir = '../../models';
 
 void initOpusLibrary() {
@@ -92,7 +92,7 @@ Future<void> main() async {
   initOpusLibrary();
 
   final whisperModel =
-      Platform.environment['VOICEPIPE_WHISPER_MODEL'] ?? 'tiny';
+      Platform.environment['VOICE_FORGE_WHISPER_MODEL'] ?? 'tiny';
   stdout.writeln('loading sherpa-onnx + models from $_modelsDir '
       '(whisper=$whisperModel) ...');
   final sw = Stopwatch()..start();

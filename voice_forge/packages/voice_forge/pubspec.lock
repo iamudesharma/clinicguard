@@ -281,13 +281,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
-  sherpa_onnx:
-    dependency: "direct main"
-    description:
-      path: "../../third_party/sherpa_onnx"
-      relative: true
-    source: path
-    version: "1.13.5"
   source_map_stack_trace:
     dependency: transitive
     description:
@@ -384,6 +377,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "15.2.0"
+  voice_forge_speech:
+    dependency: "direct main"
+    description:
+      path: "../voice_forge_speech"
+      relative: true
+    source: path
+    version: "1.13.5"
   wasm_ffi:
     dependency: transitive
     description:

@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:voicepipe_flutter/voicepipe_flutter.dart';
+import 'package:voice_forge_flutter/voice_forge_flutter.dart';
 
 import '../config.dart';
 import '../services/api_client.dart';
@@ -25,8 +25,8 @@ class TranscriptLine {
   });
 }
 
-/// Voice call state driven by [VoiceCallController] (voicepipe transport):
-/// microphone -> WebRTC -> voicepipe agent, with the `agent.events`
+/// Voice call state driven by [VoiceCallController] (voice_forge transport):
+/// microphone -> WebRTC -> voice_forge agent, with the `agent.events`
 /// data-channel contract (user_transcript / assistant_text / agent_state /
 /// summary). Barge-in is handled server-side by the agent's own VAD + onset
 /// gate; on web the app additionally taps the mic PCM and sends an instant

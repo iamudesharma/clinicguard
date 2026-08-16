@@ -1,10 +1,10 @@
-# voicepipe
+# voice_forge
 
 Minimal open-source voice-agent framework — 100% Dart, no LiveKit, no Python.
 
 A real-time voice agent needs: audio transport (WebRTC), speech-to-text, a language
 model, text-to-speech, and a small conversation loop to glue them together.
-LiveKit gives you all of this; `voicepipe` gives you a tiny, readable, dependency-free
+LiveKit gives you all of this; `voice_forge` gives you a tiny, readable, dependency-free
 version of the same idea that runs in ~90 MB and deploys as a single `dart compile exe`
 binary.
 
@@ -23,8 +23,8 @@ binary.
 - [x] Transport POC — audio + data-channel round trip (Phase 1)
 - [x] Voice pipeline — VAD → STT → LLM → TTS loop over WebRTC (Phase 2)
 - [x] Framework API — `VoiceAgent`, `AgentSession`, pluggable VAD/STT/TTS/LLM (Phase 3)
-- [x] Flutter client package — `voicepipe_flutter` (`VoiceCallController`) (Phase 3)
-- [x] **ClinicGuard migration (Phase 4)** — the app talks to the voicepipe
+- [x] Flutter client package — `voice_forge_flutter` (`VoiceCallController`) (Phase 3)
+- [x] **ClinicGuard migration (Phase 4)** — the app talks to the voice_forge
       triage agent by default (see `examples/clinicguard_agent`); the Python
       FastAPI remains the control plane (patients, summaries, Supabase)
 - [x] **Tool calling (Phase 5)** — OpenAI-compatible function calling in the
@@ -36,7 +36,7 @@ binary.
       POSTs the latest transcript to `{control-plane}/rag/search` (Supabase
       pgvector via the FastAPI store) and injects the top-k chunks as one-shot
       system context before every LLM call
-- [ ] Publish to pub.dev (packages are `publish_to: none` until the API settles)
+- [ ] Publish to pub.dev (packages are `publish_to: none` until the API settles) — see `PUBLISHING.md` for the current compliance state
 
 ## Phase 2 — verified
 
@@ -79,16 +79,17 @@ in the client's data-channel log.
   Dart FFI corrupts state at 48 kHz (decoder output amplifies to full-scale;
   encoder output shrinks). Real continuous streams (phase-progressive frames)
   are unaffected — all production paths use persistent instances.
-- `third_party/sherpa_onnx` is a vendored, Flutter-free build of the official
+- `packages/voice_forge_speech` is a vendored, Flutter-free build of the official
   `sherpa_onnx` Dart bindings (Apache-2.0) with a small patch to inject the
-  loaded native library handle. Upstream it and this disappears.
+  loaded native library handle. It ships as its own pub.dev package
+  (`voice_forge_speech: ^1.13.5`); upstreaming the patch still applies.
 
 ## Layout
 
 ```
-packages/voicepipe            # pure Dart framework (transport, speech, llm, session)
-packages/voicepipe_flutter    # Flutter client package (Phase 3)
-third_party/sherpa_onnx       # vendored pure-Dart sherpa-onnx bindings
+packages/voice_forge            # pure Dart framework (transport, speech, llm, session)
+packages/voice_forge_flutter    # Flutter client package (Phase 3)
+packages/voice_forge_speech     # vendored pure-Dart sherpa-onnx bindings (own package)
 third_party/native/           # downloaded libsherpa-onnx-c-api (gitignored)
 models/                       # downloaded speech models (gitignored)
 scripts/                      # fetch_native.sh, fetch_models.sh

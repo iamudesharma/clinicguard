@@ -53,6 +53,6 @@ Future<HttpServer> runVoiceCallServer({
     InternetAddress.anyIPv4,
     port,
   );
-  stdout.writeln('[voicepipe] http://$host:$port (ws /signal, GET /health)');
+  stdout.writeln('[voice_forge] http://$host:$port (ws /signal, GET /health)');
   return server;
 }

@@ -1,4 +1,4 @@
-/// voicepipe — minimal voice-agent framework for Dart.
+/// voice_forge — minimal voice-agent framework for Dart.
 ///
 /// Design goals:
 ///  - one dependency per concern, all published Dart packages

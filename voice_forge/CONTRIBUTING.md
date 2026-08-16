@@ -1,15 +1,16 @@
-# Contributing to voicepipe
+# Contributing to voice_forge
 
-Thanks for wanting to help! voicepipe is a small, dependency-light voice-agent
+Thanks for wanting to help! voice_forge is a small, dependency-light voice-agent
 framework; the whole point is that one person can hold it in their head.
 
 ## Project layout
 
 ```
-packages/voicepipe            # pure Dart server framework
-packages/voicepipe_flutter    # Flutter client (VoiceCallController)
-third_party/sherpa_onnx       # vendored Apache-2.0 bindings (do not edit beyond
-                              # the documented Flutter-free patches in README.md)
+packages/voice_forge            # pure Dart server framework
+packages/voice_forge_flutter    # Flutter client (VoiceCallController)
+packages/voice_forge_speech     # vendored Apache-2.0 bindings, own pub.dev
+                              # package (do not edit beyond the documented
+                              # Flutter/web-free patches in README.md)
 examples/                     # POCs + the ClinicGuard agent, each with self-tests
 scripts/                      # one-command model/native downloads
 ```
@@ -17,20 +18,20 @@ scripts/                      # one-command model/native downloads
 ## Design rules
 
 1. **One dependency per concern.** Transport (`webrtc_dart`), codec
-   (`opus_codec_dart`), speech (`sherpa_onnx`), HTTP (`http`). Don't add a
+   (`opus_codec_dart`), speech (`voice_forge_speech`), HTTP (`http`). Don't add a
    framework to glue them.
 2. **Providers behind interfaces.** `VoicepipeVAD/STT/TTS/LLM` — the session
    loop must never import a specific provider.
 3. **Small.** Prefer a focused PR over a sweeping one; the framework should
    stay readable in one sitting.
-4. **Tests.** `packages/voicepipe`: `dart test` (unit). Examples: run the
+4. **Tests.** `packages/voice_forge`: `dart test` (unit). Examples: run the
    self-tests (`RESULT: PASS` expected). Flutter: `flutter test` + analyze.
 
 ## Verifying
 
 ```bash
-cd packages/voicepipe && dart test && dart analyze
-cd ../voicepipe_flutter && flutter test && flutter analyze
+cd packages/voice_forge && dart test && dart analyze
+cd ../voice_forge_flutter && flutter test && flutter analyze
 cd examples/poc_server && dart run bin/self_test.dart        # transport
 cd examples/clinicguard_agent && dart run bin/self_test.dart # full agent (needs models + a Groq key)
 ```
@@ -49,7 +50,9 @@ cd examples/clinicguard_agent && dart run bin/self_test.dart # full agent (needs
 
 ## Releasing
 
-Phase 5 is not done: the packages are not yet on pub.dev (`publish_to: none`).
-Before publishing: real repo URL in pubspecs, CHANGELOGs, examples wiring,
-and a decision on `third_party/sherpa_onnx` (publish a pure-Dart
-`sherpa_onnx_dart` package instead of vendoring).
+See `PUBLISHING.md` for the full checklist and current compliance state.
+Order: `voice_forge_speech` → `voice_forge` → `voice_forge_flutter`. Before the
+first real publish: set the real repo URL in the pubspecs, drop the
+temporary `dependency_overrides` once voice_forge_speech is live, and commit
+from a clean tree. Until then the packages ship with `--dry-run` verification
+only — nothing is uploaded.

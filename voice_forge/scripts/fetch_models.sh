@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Downloads the speech models for the voicepipe agent (silero VAD, whisper
+# Downloads the speech models for the voice_forge agent (silero VAD, whisper
 # tiny multilingual, piper en_US-lessac-medium int8) + a test wav.
-# Run from voicepipe/. Output: models/
+# Run from voice_forge/. Output: models/
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p models
@@ -30,7 +30,7 @@ fetch_whisper() { # prefix (tiny|base)
 }
 
 fetch_whisper tiny
-# Optional: better accuracy, ~2.5x memory (set VOICEPIPE_WHISPER_MODEL=base)
+# Optional: better accuracy, ~2.5x memory (set VOICE_FORGE_WHISPER_MODEL=base)
 # fetch_whisper base
 
 # Piper en_US-lessac-medium (int8; ~19 MB)

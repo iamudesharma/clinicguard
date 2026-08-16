@@ -1,4 +1,4 @@
-/// voicepipe Phase 1 POC — headless client self-test.
+/// voice_forge Phase 1 POC — headless client self-test.
 ///
 /// Connects to the POC server as a real WebRTC peer (no Flutter needed):
 ///  1. signals offer/answer + ICE over WebSocket
@@ -50,7 +50,7 @@ void initOpusLibrary() {
 
 void main() async {
   initOpusLibrary();
-  stdout.writeln('=== voicepipe headless self-test ===');
+  stdout.writeln('=== voice_forge headless self-test ===');
 
   final ws = WebSocketChannel.connect(Uri.parse(_serverUrl));
   final pc = RTCPeerConnection(RtcConfiguration(
@@ -233,7 +233,7 @@ void main() async {
       '(expected ~440 Hz)');
 
   if (Platform.environment.containsKey('DUMP_PCM')) {
-    final f = File('/tmp/voicepipe_loop.pcm');
+    final f = File('/tmp/voice_forge_loop.pcm');
     f.writeAsBytesSync(Int16List.fromList(receivedPcm).buffer.asUint8List());
     stdout.writeln('dumped ${receivedPcm.length} samples to ${f.path}');
     stdout.writeln('first 64 samples: '

@@ -1,5 +1,5 @@
 // Native platform initialization (dart:io available).
-// Vendored for voicepipe: an injected DynamicLibrary handle is used on
+// Vendored for voice_forge: an injected DynamicLibrary handle is used on
 // macOS, because the native lib is loaded by the host process (RTLD_LOCAL)
 // and would not be visible via DynamicLibrary.process().
 import 'dart:io';

@@ -26,3 +26,6 @@ app/android/.gradle/
 .idea/
 .vscode/
 *.iml
+
+# Internal dev tooling — never pushed (how-we-work, not what-we-ship)
+.opencode/agent/sherpa-sync-*.md

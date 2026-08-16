@@ -1,4 +1,4 @@
-/// voicepipe_flutter — Flutter client for voicepipe voice agents.
+/// voice_forge_flutter — Flutter client for voice_forge voice agents.
 ///
 /// ```dart
 /// final call = VoiceCallController(signalingUrl: 'ws://host:8765/signal');

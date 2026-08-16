@@ -1,6 +1,6 @@
 /// App configuration. Override values at build time:
 /// flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8000
-///              --dart-define=VOICEPIPE_SIGNALING_URL=ws://192.168.1.10:8765/signal
+///              --dart-define=VOICE_FORGE_SIGNALING_URL=ws://192.168.1.10:8765/signal
 ///              --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
 class AppConfig {
   AppConfig._();
@@ -8,9 +8,9 @@ class AppConfig {
   static const String apiBaseUrl =
       String.fromEnvironment('API_BASE_URL', defaultValue: 'http://127.0.0.1:8000');
 
-  /// voicepipe agent server WebSocket endpoint (no LiveKit token needed).
+  /// voice_forge agent server WebSocket endpoint (no LiveKit token needed).
   static const String signalingUrl = String.fromEnvironment(
-    'VOICEPIPE_SIGNALING_URL',
+    'VOICE_FORGE_SIGNALING_URL',
     defaultValue: 'ws://127.0.0.1:8765/signal',
   );
 
