@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="/home/ubuntu/flutter/bin:/home/ubuntu/.local/bin:${PATH}"
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "==> voice_forge workspace"
