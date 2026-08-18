@@ -173,24 +173,16 @@ class AgentSession {
   Stream<bool> get speaking => _speaking.stream;
 
   AgentSession({
-    required VoicepipeVAD vad,
-    required VoicepipeSTT stt,
-    required VoicepipeTTS tts,
-    required VoicepipeLlm llm,
-    VoicepipeStreamingSTT? streamingStt,
+    required this._vad,
+    required this._stt,
+    required this._tts,
+    required this._llm,
+    this._streamingStt,
     String? systemPrompt,
-    double bargeInRmsThreshold = 0.03,
-    int bargeInOnsetFrames = 4,
-    Duration ttsTimeout = _synthTimeout,
-  })  : _vad = vad,
-        _stt = stt,
-        _tts = tts,
-        _llm = llm,
-        _streamingStt = streamingStt,
-        _systemPrompt = systemPrompt ?? _defaultPrompt,
-        _bargeInRmsThreshold = bargeInRmsThreshold,
-        _bargeInOnsetFrames = bargeInOnsetFrames,
-        _ttsTimeout = ttsTimeout;
+    this._bargeInRmsThreshold = 0.03,
+    this._bargeInOnsetFrames = 4,
+    this._ttsTimeout = _synthTimeout,
+  }) : _systemPrompt = systemPrompt ?? _defaultPrompt;
 
   static const _defaultPrompt =
       'You are a voice triage assistant for a clinic. Ask concise questions '
@@ -390,7 +382,7 @@ class AgentSession {
             '(low|medium|high|emergency), reason, recommendation, language. '
             'Reply with the JSON object only.\n\n'
             'TRANSCRIPT:\n$transcript'),
-        if (extra != null) extra,
+        ?extra,
       ], maxTokens: _structuredMaxTokens);
       return _extractJson(reply);
     } catch (e) {
@@ -412,7 +404,7 @@ class AgentSession {
           .join('\n');
       final reply = await _llm.reply([
         ChatMessage('system', '$instruction\n\nTRANSCRIPT:\n$transcript'),
-        if (extra != null) extra,
+        ?extra,
       ], maxTokens: _structuredMaxTokens);
       return _extractJson(reply);
     } catch (e) {

@@ -369,6 +369,7 @@ class _SherpaStreamingStt implements VoicepipeStreamingSTT {
 
   /// Set language hint for multilingual models (e.g. Nemotron 3.5).
   /// [lang] — e.g. 'en-US', 'hi-IN', or 'auto' for auto-detection.
+  @override
   void setLanguage(String lang) {
     _stream.setOption(key: 'language', value: lang);
   }

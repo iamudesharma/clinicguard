@@ -1091,7 +1091,7 @@ class _SttSettingsRowState extends State<_SttSettingsRow> {
               Switch(
                 value: callState.usePlatformStt,
                 onChanged: (v) => callState.setUsePlatformStt(v),
-                activeColor: AppColors.neonCyan,
+                activeThumbColor: AppColors.neonCyan,
               ),
             ],
           ),

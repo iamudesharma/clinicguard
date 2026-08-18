@@ -123,22 +123,21 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     this.timeout = const Duration(seconds: 45),
     String? name,
     Map<String, String>? extraHeaders,
-    Map<String, String> Function()? requestHeaders,
+    this._requestHeaders,
     http.Client? client,
   }) : _client = client ?? http.Client(),
        // Strip trailing slashes: providers document base URLs like
        // ".../v1beta/openai/" and appending "/chat/completions" would 404.
        baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
        name = (name == null || name.isEmpty) ? model : name,
-       _extraHeaders = extraHeaders ?? const {},
-       _requestHeaders = requestHeaders;
+       _extraHeaders = extraHeaders ?? const {};
 
   Map<String, String> _headers() {
     return {
       'Authorization': 'Bearer $apiKey',
       'Content-Type': 'application/json',
       ..._extraHeaders,
-      if (_requestHeaders != null) ..._requestHeaders!(),
+      if (_requestHeaders != null) ..._requestHeaders(),
     };
   }
 

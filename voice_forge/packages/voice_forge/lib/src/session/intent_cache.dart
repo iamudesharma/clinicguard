@@ -33,9 +33,10 @@ class IntentCache {
   int _totalMisses = 0;
   int _totalExpired = 0;
 
-  IntentCache({int maxEntries = 50, Duration ttl = const Duration(minutes: 30)})
-      : _maxEntries = maxEntries,
-        _ttl = ttl;
+  IntentCache({
+    this._maxEntries = 50,
+    this._ttl = const Duration(minutes: 30),
+  });
 
   /// Look up a cached response for [query]. Returns the cached text on a
   /// hit, or null on a miss.

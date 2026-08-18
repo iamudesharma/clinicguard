@@ -111,18 +111,18 @@ class PlatformSttService {
     try {
       await _speech.listen(
         onResult: _onResult,
-        localeId: localeId.isEmpty ? null : localeId,
         listenOptions: SpeechListenOptions(
           partialResults: true,
           cancelOnError: false,
           listenMode: stt.ListenMode.dictation,
           autoPunctuation: true,
+          localeId: localeId.isEmpty ? null : localeId,
+          // Long listen duration (10 min) — auto-restart handles pauses.
+          listenFor: const Duration(minutes: 10),
+          // Generous pause: 8 seconds before the platform considers the
+          // utterance complete. Apple's dictation uses ~3-5s.
+          pauseFor: const Duration(seconds: 8),
         ),
-        // Long listen duration (10 min) — auto-restart handles pauses.
-        listenFor: const Duration(minutes: 10),
-        // Generous pause: 8 seconds before the platform considers the
-        // utterance complete. Apple's dictation uses ~3-5s.
-        pauseFor: const Duration(seconds: 8),
       );
       debugPrint('[PlatformStt] listening (locale: $localeId)');
     } catch (e) {
