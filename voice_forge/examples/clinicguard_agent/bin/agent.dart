@@ -25,6 +25,8 @@ import 'package:http/http.dart' as http;
 import 'package:opus_codec_dart/opus_codec_dart.dart';
 import 'package:voice_forge/voice_forge.dart';
 
+import 'llm_config.dart';
+
 const _modelsDir = '../../models';
 const _defaultApiBase = 'http://127.0.0.1:8000';
 
@@ -111,9 +113,17 @@ class TriageCore implements AudioCore {
   // client is created for the next call.
   http.Client? _ragHttp;
   final _events = StreamController<Map<String, dynamic>>.broadcast();
+  StreamSubscription<AgentEvent>? _sessionSub;
   String? _patientId;
   Map<String, dynamic>? _patient;
   bool _bookedDuringCall = false;
+
+  /// Completes when the patient-id load attempt finishes (success or failure).
+  /// Lets the greeting await the real lookup instead of polling a deadline.
+  Completer<bool>? _patientLoad;
+
+  /// Prefetched appointment slots (populated at session start).
+  Future<Map<String, dynamic>>? _slotsFuture;
 
   http.Client get _ragClient => _ragHttp ??= http.Client();
 
@@ -130,8 +140,12 @@ class TriageCore implements AudioCore {
       toolExecutor: _runTool,
       knowledgeProvider: _knowledgeForTurn,
     );
+    // O6: repeated triage queries skip the LLM entirely (cache HIT goes
+    // straight to TTS, ~300ms). Tool-driven turns (slots/booking) are not
+    // cached by the framework.
+    session.enableIntentCache();
     _lastUserTurnAt = null;
-    session.events.listen((e) {
+    _sessionSub = session.events.listen((e) {
       final p = e.payload;
       try {
         _events.add(p);
@@ -148,21 +162,30 @@ class TriageCore implements AudioCore {
           p['state'] == 'speaking' &&
           _thinkingAt != null) {
         final ms = DateTime.now().difference(_thinkingAt!).inMilliseconds;
-        safeLog('[$roomId] THINK->SPEAK: $ms ms '
-            '(STT+RAG+LLM first token + first sentence TTS)');
+        safeLog(
+          '[$roomId] THINK->SPEAK: $ms ms '
+          '(STT+RAG+LLM first token + first sentence TTS)',
+        );
         _thinkingAt = null;
       }
       if (p['type'] == 'assistant_text' && _lastUserTurnAt != null) {
         final ms = DateTime.now().difference(_lastUserTurnAt!).inMilliseconds;
-        safeLog('[$roomId] TURN LATENCY: $ms ms '
-            '(speech end -> agent starts speaking)');
+        safeLog(
+          '[$roomId] TURN LATENCY: $ms ms '
+          '(speech end -> agent starts speaking)',
+        );
         _lastUserTurnAt = null;
       }
       if (p['type'] == 'user_transcript' || p['type'] == 'assistant_text') {
-        _persist(p['type'] == 'user_transcript' ? 'user' : 'assistant',
-            p['text'] as String? ?? '');
+        _persist(
+          p['type'] == 'user_transcript' ? 'user' : 'assistant',
+          p['text'] as String? ?? '',
+        );
       }
     });
+
+    // Prefetch slots at session start for instant tool-call responses.
+    _slotsFuture = _prefetchSlots();
   }
 
   DateTime? _lastUserTurnAt;
@@ -193,7 +216,8 @@ class TriageCore implements AudioCore {
         'properties': {
           'slot': {
             'type': 'string',
-            'description': 'The exact label returned by get_available_slots, '
+            'description':
+                'The exact label returned by get_available_slots, '
                 'e.g. "Tomorrow 11:00".',
           },
           'name': {
@@ -249,6 +273,17 @@ class TriageCore implements AudioCore {
   }
 
   Future<String> _getSlotsJson() async {
+    // Use prefetched slots if available (instant response).
+    final cached = _slotsFuture;
+    if (cached != null) {
+      try {
+        final data = await cached;
+        return jsonEncode(data);
+      } catch (e) {
+        safeLog('[$roomId] slots prefetch error: $e');
+      }
+    }
+    // Fallback: fetch live.
     try {
       final res = await _http
           .get(Uri.parse('$apiBase/slots'))
@@ -258,6 +293,20 @@ class TriageCore implements AudioCore {
       safeLog('[$roomId] slots fetch failed: $e');
     }
     return jsonEncode({'error': 'could not fetch slots'});
+  }
+
+  Future<Map<String, dynamic>> _prefetchSlots() async {
+    try {
+      final res = await _http
+          .get(Uri.parse('$apiBase/slots'))
+          .timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      safeLog('[$roomId] slots prefetch failed: $e');
+    }
+    return {'error': 'could not fetch slots'};
   }
 
   Future<String> _bookAppointment(Map<String, dynamic> args) async {
@@ -340,19 +389,24 @@ class TriageCore implements AudioCore {
           .timeout(const Duration(seconds: 5));
       sw.stop();
       if (res.statusCode != 200) {
-        safeLog('[$roomId] rag: status ${res.statusCode} in '
-            '${sw.elapsedMilliseconds}ms');
+        safeLog(
+          '[$roomId] rag: status ${res.statusCode} in '
+          '${sw.elapsedMilliseconds}ms',
+        );
         return null;
       }
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final results = (decoded['results'] as List?) ?? const [];
-      safeLog('[$roomId] rag: ${results.length} result(s) in '
-          '${sw.elapsedMilliseconds}ms '
-          'for "${userText.length > 60 ? userText.substring(0, 60) : userText}"');
+      safeLog(
+        '[$roomId] rag: ${results.length} result(s) in '
+        '${sw.elapsedMilliseconds}ms '
+        'for "${userText.length > 60 ? userText.substring(0, 60) : userText}"',
+      );
       if (results.isEmpty) return null;
       final buffer = StringBuffer(
-          'KNOWLEDGE BASE (retrieved snippets — they may be irrelevant; '
-          'only use what matches the patient\'s situation):\n');
+        'KNOWLEDGE BASE (retrieved snippets — they may be irrelevant; '
+        'only use what matches the patient\'s situation):\n',
+      );
       for (final r in results.take(ragTopK)) {
         if (buffer.length >= ragMaxContextChars) break;
         final title = r['title']?.toString() ?? '';
@@ -382,21 +436,23 @@ class TriageCore implements AudioCore {
   /// yes/no, thanks, small talk, and the booking flow) skips retrieval so the
   /// voice loop stays fast.
   static final RegExp _knowledgeIntent = RegExp(
-      r'\b(fever|cold|flu|cough|sore throat|headache|migraine|pain|ache|'
-      r'symptom|treat|treatment|medicine|medication|tablet|allerg|asthma|'
-      r'wheez|diabetes|sugar|blood pressure|\bbp\b|hypertension|heart|chest|'
-      r'throat|stomach|nausea|vomit|diarrhea|dehydrat|dizzy|sleep|insomnia|'
-      r'fatigue|weakness|wound|injury|burn|bite|sting|rash|hives|ear|eye|'
-      r'dental|tooth|infection|antibiotic|vaccin|red flag|urgent|emergency|'
-      r'what should|how do|how to|what can|is it normal|why do|should i)\b',
-      caseSensitive: false);
+    r'\b(fever|cold|flu|cough|sore throat|headache|migraine|pain|ache|'
+    r'symptom|treat|treatment|medicine|medication|tablet|allerg|asthma|'
+    r'wheez|diabetes|sugar|blood pressure|\bbp\b|hypertension|heart|chest|'
+    r'throat|stomach|nausea|vomit|diarrhea|dehydrat|dizzy|sleep|insomnia|'
+    r'fatigue|weakness|wound|injury|burn|bite|sting|rash|hives|ear|eye|'
+    r'dental|tooth|infection|antibiotic|vaccin|red flag|urgent|emergency|'
+    r'what should|how do|how to|what can|is it normal|why do|should i)\b',
+    caseSensitive: false,
+  );
 
   /// Booking-flow turns: the LLM handles these via tools; grounding adds
   /// nothing but latency.
   static final RegExp _bookingFlow = RegExp(
-      r'\b(book|booking|appointment|slot|schedule|tomorrow|available|'
-      r'doctor|clinic|visit|morning|afternoon|evening|time)\b',
-      caseSensitive: false);
+    r'\b(book|booking|appointment|slot|schedule|tomorrow|available|'
+    r'doctor|clinic|visit|morning|afternoon|evening|time)\b',
+    caseSensitive: false,
+  );
 
   bool _shouldRetrieve(String userText) {
     final t = userText.trim();
@@ -407,14 +463,16 @@ class TriageCore implements AudioCore {
 
   void _persist(String role, String text) {
     if (text.isEmpty) return;
-    unawaited(_http
-        .post(
-          Uri.parse('$apiBase/sessions/$roomId/transcripts'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'role': role, 'text': text, 'language': 'auto'}),
-        )
-        .then((_) {})
-        .catchError((_) {}));
+    unawaited(
+      _http
+          .post(
+            Uri.parse('$apiBase/sessions/$roomId/transcripts'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'role': role, 'text': text, 'language': 'auto'}),
+          )
+          .then((_) {})
+          .catchError((_) {}),
+    );
   }
 
   @override
@@ -428,6 +486,7 @@ class TriageCore implements AudioCore {
     if (message['event'] == 'patient_id') {
       final id = message['patient_id'] as String?;
       if (id != null && id.isNotEmpty && _patient == null) {
+        _patientLoad ??= Completer<bool>();
         unawaited(_loadPatient(id));
       }
     }
@@ -437,7 +496,26 @@ class TriageCore implements AudioCore {
     }
     if (message['event'] == 'end_call') {
       safeLog('[$roomId] end_call from client; finalizing...');
-      unawaited(_finalize());
+      unawaited(_finalizeAndDispose());
+    }
+    // Platform STT (Apple/Web): client sends recognized text directly.
+    if (message['event'] == 'stt_text') {
+      final text = message['text'] as String? ?? '';
+      final isFinal = message['is_final'] == true;
+      if (isFinal && text.isNotEmpty) {
+        safeLog('[$roomId] platform STT final: "$text"');
+        session.acceptExternalText(text);
+      }
+      // Partials are displayed client-side only; agent doesn't need them.
+    }
+    // Client tells agent to disable its own VAD/STT when platform STT is active.
+    if (message['event'] == 'platform_stt_enabled') {
+      safeLog('[$roomId] platform STT enabled by client; disabling agent STT');
+      session.disableAgentStt();
+    }
+    if (message['event'] == 'platform_stt_disabled') {
+      safeLog('[$roomId] platform STT disabled by client; re-enabling agent STT');
+      session.enableAgentStt();
     }
   }
 
@@ -447,8 +525,9 @@ class TriageCore implements AudioCore {
   @override
   void onPeerClosed() {
     safeLog('[$roomId] call ended; finalizing...');
-    // Generate the summary BEFORE clearing the session history.
-    unawaited(_finalize().whenComplete(session.endCall));
+    // Generate the summary BEFORE clearing the session history, then tear
+    // down this call's resources (subscriptions, HTTP clients, streams).
+    unawaited(_finalizeAndDispose());
   }
 
   @override
@@ -480,19 +559,37 @@ class TriageCore implements AudioCore {
   }
 
   Future<void> _greetWhenReady() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 3));
-    while (_patient == null && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    // Suppress barge-in immediately: the client's detector may fire during
+    // the patient-data wait window (before greet() sets _greetingActive).
+    session.suppressBargeIn();
+    // onDataChannelOpen often wins the race against the client's patient_id
+    // message (sent on a 300ms retry loop). Wait up to 3s for the lookup to
+    // start/finish so a selected patient gets the personalized greeting.
+    _patientLoad ??= Completer<bool>();
+    if (!_patientLoad!.isCompleted) {
+      unawaited(
+        Future<void>.delayed(const Duration(seconds: 3), () {
+          if (!_patientLoad!.isCompleted) _patientLoad!.complete(false);
+        }),
+      );
+      try {
+        await _patientLoad!.future;
+      } catch (_) {}
     }
     final name = _patient?['name']?.toString().trim();
     final greeting = (name != null && name.isNotEmpty)
         ? 'Namaste, welcome back $name. The clinic has your records. '
-            'Please tell me what is bothering you today.'
+              'Please tell me what is bothering you today.'
         : _greeting;
+    safeLog(
+      '[$roomId] greeting: ${name != null && name.isNotEmpty ? "personalized ($name)" : "generic"}',
+    );
     // The standard greeting was pre-synthesized at startup; the patient-name
     // variant (unique per call) is synthesized on the fly.
-    await session.greet(greeting,
-        preSynthesized: greeting == _greeting ? cachedGreeting : null);
+    await session.greet(
+      greeting,
+      preSynthesized: greeting == _greeting ? cachedGreeting : null,
+    );
   }
 
   @override
@@ -509,8 +606,10 @@ class TriageCore implements AudioCore {
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       _patientId = id;
       _patient = decoded;
+      _patientLoad?.complete(true);
     } catch (e) {
       safeLog('[$roomId] patient lookup failed: $e');
+      _patientLoad?.complete(false);
       return;
     }
     final parts = <String>[
@@ -532,13 +631,31 @@ class TriageCore implements AudioCore {
     safeLog('[$roomId] patient context loaded: ${_patient?['name']}');
   }
 
+  /// Finalize once, then release this call's resources. Idempotent: the
+  /// self-test sends `end_call` and then closes the transport, which would
+  /// otherwise run _finalize twice (and dispose a disposed session).
+  bool _finalizing = false;
+  Future<void> _finalizeAndDispose() async {
+    if (_finalizing) return;
+    _finalizing = true;
+    try {
+      await _finalize();
+    } finally {
+      session.endCall();
+      dispose();
+    }
+  }
+
   Future<void> _finalize() async {
     var summary = await session.generateSummary();
     if (summary == null) {
       // One retry with an explicit "JSON only" instruction.
       summary = await session.generateSummary(
-          extra: ChatMessage('user',
-              'Reply with the JSON object only. No prose, no markdown.'));
+        extra: ChatMessage(
+          'user',
+          'Reply with the JSON object only. No prose, no markdown.',
+        ),
+      );
     }
     if (summary != null) {
       _events.add({
@@ -548,20 +665,22 @@ class TriageCore implements AudioCore {
       });
       safeLog('[$roomId] summary: $summary');
       if (_patientId != null) {
-        unawaited(_http
-            .put(
-              Uri.parse('$apiBase/sessions/$roomId'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode(
-                  {'patient_id': _patientId, 'status': 'ended'}),
-            )
-            .then((_) {})
-            .catchError((_) {}));
+        unawaited(
+          _http
+              .put(
+                Uri.parse('$apiBase/sessions/$roomId'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'patient_id': _patientId, 'status': 'ended'}),
+              )
+              .then((_) {})
+              .catchError((_) {}),
+        );
       }
     } else {
       safeLog('[$roomId] summary generation failed');
     }
     await _maybeBookAppointment(summary);
+    safeLog('[$roomId] intent cache stats: ${session.cacheStats}');
   }
 
   Future<void> _maybeBookAppointment(Map<String, dynamic>? summary) async {
@@ -592,10 +711,10 @@ class TriageCore implements AudioCore {
             .get(Uri.parse('$apiBase/slots'))
             .timeout(const Duration(seconds: 5));
         if (res.statusCode == 200) {
-          final slots =
-              (jsonDecode(res.body)['slots'] as List?) ?? const [];
-          slotLabel =
-              slots.isNotEmpty ? (slots.first['label'] as String? ?? '') : '';
+          final slots = (jsonDecode(res.body)['slots'] as List?) ?? const [];
+          slotLabel = slots.isNotEmpty
+              ? (slots.first['label'] as String? ?? '')
+              : '';
         }
       } catch (e) {
         safeLog('[$roomId] slots fetch failed: $e');
@@ -622,16 +741,18 @@ class TriageCore implements AudioCore {
       }
       final booking = jsonDecode(res.body) as Map<String, dynamic>;
       _events.add({'type': 'booking_confirmed', 'booking': booking});
-      stdout
-          .writeln('[$roomId] booked ${booking['slot']} (${booking['id']})');
+      stdout.writeln('[$roomId] booked ${booking['slot']} (${booking['id']})');
       await session.greet(
-          'I have booked your appointment for $slotLabel. Take care and get well soon.');
+        'I have booked your appointment for $slotLabel. Take care and get well soon.',
+      );
     } catch (e) {
       safeLog('[$roomId] booking failed: $e');
     }
   }
 
   void dispose() {
+    _sessionSub?.cancel();
+    _sessionSub = null;
     session.dispose();
     _events.close();
     _http.close();
@@ -643,29 +764,56 @@ Future<void> main() async {
   initOpusLibrary();
 
   final env = Platform.environment;
-  final whisperModel = env['VOICE_FORGE_WHISPER_MODEL'] ?? 'tiny';
+  final whisperModel = env['VOICE_FORGE_WHISPER_MODEL'] ?? 'base';
+  final whisperLang = env['VOICE_FORGE_WHISPER_LANG'] ?? 'en';
+  final whisperTask = env['VOICE_FORGE_WHISPER_TASK'] ?? 'transcribe';
   final apiBase = env['API_BASE_URL'] ?? _defaultApiBase;
-  safeLog('loading sherpa-onnx (whisper=$whisperModel) ...');
+  safeLog('loading sherpa-onnx (whisper=$whisperModel, lang=$whisperLang) ...');
   final sw = Stopwatch()..start();
+  final streamingModelType = env['VOICE_FORGE_STREAMING_MODEL_TYPE'] ?? 'nemo';
   final kit = await SherpaKit.load(
-    models: SherpaModels.fromModelsDir(_modelsDir, whisperPrefix: whisperModel),
+    models: SherpaModels.fromModelsDir(
+      _modelsDir,
+      whisperPrefix: whisperModel,
+      streamingDir: '$_modelsDir/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11',
+      whisperLanguage: whisperLang,
+      whisperTask: whisperTask,
+      streamingModelType: streamingModelType,
+    ),
   );
   safeLog('sherpa-onnx ready in ${sw.elapsed.inSeconds}s');
 
-  final llm = llmFromEnv(env);
-  safeLog('LLM: ${llm is EchoLlm ? "EchoLlm (offline)" : "OpenAI-compatible"}'
-      ' | control plane: $apiBase');
+  final llm = clinicGuardLlmFromEnv(env);
+  safeLog(
+    'LLM: ${llm.label}'
+    ' | control plane: $apiBase',
+  );
+  safeLog(
+    'LLM prompt prefix: ${_systemPrompt.length} chars '
+    '(stable for provider-side caching)',
+  );
 
   // STT/TTS run in a worker isolate so speech never blocks the LLM turn;
   // VAD stays on the main isolate (cheap, and one stateful instance per call).
   final speech = await kit.createWorkerSpeech();
+  final streamingStt = kit.streamingStt;
+  if (streamingStt != null) {
+    // Set language hint for multilingual models (Nemotron).
+    final langHint = whisperLang == 'hi' ? 'hi-IN' : 'en-US';
+    streamingStt.setLanguage(langHint);
+    safeLog('streaming STT: $streamingModelType (partials + finalize, lang: $langHint)');
+  } else {
+    safeLog('streaming STT: unavailable (using batch Whisper)');
+  }
 
   // Pre-synthesize the standard greeting so the first call skips TTS.
   TtsAudio? greetingAudio;
   try {
     greetingAudio = await speech.tts.synthesize(_greeting);
-    safeLog('greeting pre-synthesized '
-        '(${greetingAudio.samples.length} samples)');
+    safeLog(
+      'greeting pre-synthesized '
+      '(${greetingAudio.samples.length} samples)',
+    );
   } catch (e) {
     safeLog('greeting pre-synthesis failed; will synthesize on the fly: $e');
   }
@@ -675,6 +823,7 @@ Future<void> main() async {
     stt: speech.stt,
     tts: speech.tts,
     llm: llm,
+    streamingStt: streamingStt,
     systemPrompt: _systemPrompt,
   );
 
@@ -685,12 +834,14 @@ Future<void> main() async {
       safeLog('[$roomId] session started');
       final ragTopK = int.tryParse(env['RAG_TOP_K'] ?? '') ?? 3;
       final ragMax = int.tryParse(env['RAG_MAX_CONTEXT_CHARS'] ?? '') ?? 2400;
-      final core = TriageCore(agent.createSession(),
-          roomId: roomId,
-          apiBase: apiBase,
-          ragTopK: ragTopK,
-          ragMaxContextChars: ragMax,
-          cachedGreeting: greetingAudio);
+      final core = TriageCore(
+        agent.createSession(),
+        roomId: roomId,
+        apiBase: apiBase,
+        ragTopK: ragTopK,
+        ragMaxContextChars: ragMax,
+        cachedGreeting: greetingAudio,
+      );
       return core;
     },
   );

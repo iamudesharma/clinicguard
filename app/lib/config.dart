@@ -18,8 +18,9 @@ class AppConfig {
       String.fromEnvironment('USER_ID', defaultValue: 'demo-patient');
 
   /// Instant local barge-in RMS threshold (0..1). Raise it (e.g. 0.06-0.1)
-  /// when the mic picks up the agent's own TTS on speakers — the pipeline
-  /// has no echo cancellation, so headphones work best at the default.
+  /// if residual echo slips through AEC on loud speakers — the mic track
+  /// runs with echoCancellation/noiseSuppression/autoGainControl on, but
+  /// headphones still work best at the default.
   static const String _bargeInRms =
       String.fromEnvironment('BARGE_IN_RMS_THRESHOLD', defaultValue: '0.025');
   static final double bargeInRmsThreshold = double.tryParse(_bargeInRms) ?? 0.025;

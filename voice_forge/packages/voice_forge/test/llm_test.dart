@@ -12,6 +12,54 @@ void main() {
     expect(await llm.reply([const ChatMessage('user', 'hi')]), 'hello there');
   });
 
+  test('OpenAiCompatibleLlm retries as a plain request when the stream '
+      'yields only reasoning', () async {
+    var streamCalls = 0;
+    final client = MockClient((req) async {
+      if (req.body.contains('"stream":true')) {
+        streamCalls++;
+        return http.Response.bytes(
+          utf8.encode(
+            'data: ${jsonEncode({
+              'choices': [
+                {'delta': {'reasoning_content': 'thinking...'}},
+              ],
+            })}\n\ndata: [DONE]\n\n',
+          ),
+          200,
+          headers: {'content-type': 'text/event-stream'},
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'choices': [
+            {
+              'message': {
+                'role': 'assistant',
+                'content': 'hello there',
+              },
+            },
+          ],
+        }),
+        200,
+      );
+    });
+    final llm = OpenAiCompatibleLlm(
+      baseUrl: 'https://example.test/v1',
+      apiKey: 'k',
+      model: 'm',
+      client: client,
+    );
+    var partial = '';
+    final reply = await llm.streamReplyWithTools(
+      [const ChatMessage('user', 'hi')],
+      onPartial: (p) => partial += p,
+    );
+    expect(streamCalls, 1);
+    expect(partial, '');
+    expect(reply.content, 'hello there');
+  });
+
   test('OpenAiCompatibleLlm posts messages and parses content', () async {
     final client = MockClient((request) async {
       expect(request.url.toString(), 'https://api.test/v1/chat/completions');
@@ -242,7 +290,7 @@ void main() {
     },
   );
 
-  test('OpenAiCompatibleLlm sends OpenCode Zen client headers', () async {
+  test('OpenAiCompatibleLlm merges static and per-request headers', () async {
     String? firstSession;
     var calls = 0;
     final client = MockClient((request) async {
@@ -255,9 +303,11 @@ void main() {
       if (firstSession == null) {
         firstSession = request.headers['x-opencode-session'];
       } else {
-        // session id is stable per instance; request id changes per call
         expect(request.headers['x-opencode-session'], firstSession);
-        expect(request.headers['x-opencode-request'], isNot(firstSession));
+        expect(
+          request.headers['x-opencode-request'],
+          isNot(firstSession),
+        );
       }
       return http.Response(
         jsonEncode({
@@ -272,9 +322,16 @@ void main() {
       );
     });
     final llm = OpenAiCompatibleLlm(
-      baseUrl: 'https://opencode.ai/zen/v1',
+      baseUrl: 'https://opencode.ai/zen/go/v1',
       apiKey: 'k',
       model: 'm',
+      extraHeaders: const {
+        'x-opencode-client': 'cli',
+        'User-Agent': 'opencode/latest/cli',
+        'x-opencode-session': 'sess',
+        'x-opencode-project': 'proj',
+      },
+      requestHeaders: () => {'x-opencode-request': 'req-$calls'},
       client: client,
     );
     await llm.replyWithTools(const [ChatMessage('user', 'hi')]);
@@ -282,7 +339,7 @@ void main() {
     expect(calls, 2);
   });
 
-  test('OpenAiCompatibleLlm does not add OpenCode headers elsewhere', () async {
+  test('OpenAiCompatibleLlm does not add provider headers by default', () async {
     final client = MockClient((request) async {
       expect(request.headers['x-opencode-client'], isNull);
       expect(request.headers['User-Agent'], isNot('opencode/latest/cli'));
@@ -307,99 +364,37 @@ void main() {
     await llm.replyWithTools(const [ChatMessage('user', 'hi')]);
   });
 
-  test('llmFromEnv falls back to EchoLlm without keys', () {
+  test('llmFromEnv falls back to EchoLlm without explicit trio', () {
     expect(llmFromEnv(const {}), isA<EchoLlm>());
-    expect(llmFromEnv(const {'VOICE_FORGE_LLM_API_KEY': 'k'}), isA<EchoLlm>());
+    expect(
+      llmFromEnv(const {'VOICE_FORGE_LLM_API_KEY': 'k'}),
+      isA<EchoLlm>(),
+    );
   });
 
-  test('llmFromEnv uses Cline first, then OpenCode Zen, then OpenCode Go', () {
+  test('llmFromEnv uses explicit VOICE_FORGE_LLM_* trio', () {
     final llm = llmFromEnv(const {
-      'CLINE_API_KEY': 'c',
-      'CLINE_MODEL': 'my-cline-model',
-      'OPENCODE_API_KEY': 'zen',
-      'OPENCODE_GO_API_KEY': 'go',
+      'VOICE_FORGE_LLM_BASE_URL': 'https://api.example.com/v1',
+      'VOICE_FORGE_LLM_API_KEY': 'k',
+      'VOICE_FORGE_LLM_MODEL': 'custom-model',
     });
-    expect(llm, isA<FallbackLlm>());
-    final cline = ((llm as FallbackLlm).primary as FallbackLlm).primary;
-    expect(cline, isA<OpenAiCompatibleLlm>());
-    expect(
-      (cline as OpenAiCompatibleLlm).baseUrl,
-      'https://api.cline.bot/api/v1',
-    );
-    expect(cline.model, 'my-cline-model');
-    final zen = (llm.primary as FallbackLlm).fallback;
-    expect(zen, isA<OpenAiCompatibleLlm>());
-    expect((zen as OpenAiCompatibleLlm).baseUrl, 'https://opencode.ai/zen/v1');
-    expect(llm.fallback, isA<OpenAiCompatibleLlm>());
-    expect(
-      (llm.fallback as OpenAiCompatibleLlm).baseUrl,
-      'https://opencode.ai/zen/go/v1',
-    );
-  });
-
-  test('llmFromEnv with only a Cline key yields a plain Cline LLM', () {
-    final llm = llmFromEnv(const {'CLINE_API_KEY': 'k'});
     expect(llm, isA<OpenAiCompatibleLlm>());
-    expect(
-      (llm as OpenAiCompatibleLlm).baseUrl,
-      'https://api.cline.bot/api/v1',
-    );
+    final openAi = llm as OpenAiCompatibleLlm;
+    expect(openAi.baseUrl, 'https://api.example.com/v1');
+    expect(openAi.model, 'custom-model');
   });
 
-  test('llmFromEnv prefers OpenCode Zen before Gemini when both are set', () {
-    final llm = llmFromEnv(const {
-      'GEMINI_API_KEY': 'g',
-      'OPENCODE_API_KEY': 'oc',
-    });
+  test('chainLlms wires FallbackLlm in order', () {
+    final a = EchoLlm('a');
+    final b = EchoLlm('b');
+    final c = EchoLlm('c');
+    final llm = chainLlms([a, b, c]);
     expect(llm, isA<FallbackLlm>());
-    expect((llm as FallbackLlm).primary, isA<OpenAiCompatibleLlm>());
-    expect(
-      (llm.primary as OpenAiCompatibleLlm).baseUrl,
-      'https://opencode.ai/zen/v1',
-    );
-    expect(llm.fallback, isA<OpenAiCompatibleLlm>());
-    expect(
-      (llm.fallback as OpenAiCompatibleLlm).baseUrl,
-      'https://generativelanguage.googleapis.com/v1beta/openai',
-    );
-  });
-
-  test('llmFromEnv with only a Gemini key yields a plain Gemini LLM', () {
-    final llm = llmFromEnv(const {'GEMINI_API_KEY': 'k'});
-    expect(llm, isA<OpenAiCompatibleLlm>());
-    expect(
-      (llm as OpenAiCompatibleLlm).baseUrl,
-      'https://generativelanguage.googleapis.com/v1beta/openai',
-    );
-  });
-
-  test('llmFromEnv prefers OpenCode by default with OpenRouter fallback', () {
-    final llm = llmFromEnv(const {
-      'OPENCODE_API_KEY': 'oc',
-      'OPENROUTER_API_KEY': 'or',
-      'GROQ_API_KEY': 'g',
-    });
-    expect(llm, isA<FallbackLlm>());
-    final opencode = (llm as FallbackLlm).primary as FallbackLlm;
-    expect(opencode.primary, isA<OpenAiCompatibleLlm>());
-    expect(
-      (opencode.primary as OpenAiCompatibleLlm).baseUrl,
-      'https://opencode.ai/zen/v1',
-    );
-    expect(opencode.fallback, isA<OpenAiCompatibleLlm>());
-    expect(
-      (opencode.fallback as OpenAiCompatibleLlm).baseUrl,
-      'https://openrouter.ai/api/v1',
-    );
-    expect(
-      (llm.fallback as OpenAiCompatibleLlm).baseUrl,
-      'https://api.groq.com/openai/v1',
-    );
-  });
-
-  test('llmFromEnv single provider yields a plain LLM', () {
-    final llm = llmFromEnv(const {'GROQ_API_KEY': 'k'});
-    expect(llm, isA<OpenAiCompatibleLlm>());
+    final outer = llm as FallbackLlm;
+    expect(outer.fallback, same(c));
+    final inner = outer.primary as FallbackLlm;
+    expect(inner.primary, same(a));
+    expect(inner.fallback, same(b));
   });
 
   test(
@@ -408,7 +403,7 @@ void main() {
       var primaryCalls = 0;
       final primary = _ThrowingLlm(() {
         primaryCalls++;
-        throw LlmException('503: boom');
+        throw LlmException('400: boom');
       });
       final fallback = EchoLlm('fallback reply');
       final llm = FallbackLlm(primary: primary, fallback: fallback);
@@ -422,7 +417,7 @@ void main() {
   );
 
   test('FallbackLlm switches providers after the failure threshold', () async {
-    final primary = _ThrowingLlm(() => throw LlmException('503: boom'));
+    final primary = _ThrowingLlm(() => throw LlmException('400: boom'));
     final fallback = EchoLlm('fallback reply');
     final llm = FallbackLlm(
       primary: primary,
@@ -440,7 +435,7 @@ void main() {
   test('FallbackLlm recovers when the primary works again', () async {
     var failing = true;
     final primary = _ThrowingLlm(() {
-      if (failing) throw LlmException('503: boom');
+      if (failing) throw LlmException('400: boom');
       return 'primary ok';
     });
     final llm = FallbackLlm(
@@ -479,8 +474,31 @@ void main() {
     expect(primary.calls, 2);
   });
 
+  test('FallbackLlm marks a 5xx server-error primary down immediately',
+      () async {
+    final primary = _ThrowingLlm(() => throw LlmException('503: boom'));
+    final fallback = EchoLlm('fallback reply');
+    final llm = FallbackLlm(
+      primary: primary,
+      fallback: fallback,
+      failureThreshold: 5,
+    );
+
+    // A single 503 (endpoint unavailable) marks it down with no transient
+    // retry: the second call skips the primary entirely.
+    expect(
+      await llm.reply([const ChatMessage('user', 'hi')]),
+      'fallback reply',
+    );
+    expect(
+      await llm.reply([const ChatMessage('user', 'hi')]),
+      'fallback reply',
+    );
+    expect(primary.calls, 1);
+  });
+
   test('FallbackLlm only marks down after the threshold for non-429', () async {
-    final primary = _ThrowingLlm(() => throw LlmException('500: boom'));
+    final primary = _ThrowingLlm(() => throw LlmException('400: boom'));
     final fallback = EchoLlm('fallback reply');
     final llm = FallbackLlm(
       primary: primary,
@@ -502,7 +520,7 @@ void main() {
       var primaryCalls = 0;
       final primary = _ThrowingLlm(() {
         primaryCalls++;
-        throw LlmException('503: boom');
+        throw LlmException('400: boom');
       });
       final llm = FallbackLlm(primary: primary, fallback: EchoLlm('fb reply'));
       final partials = <String>[];
@@ -732,6 +750,9 @@ class _ThrowingLlm implements VoicepipeLlm {
   final String Function() _call;
   int calls = 0;
   _ThrowingLlm(this._call);
+
+  @override
+  String get label => 'ThrowingLlm';
 
   @override
   Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async {

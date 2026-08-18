@@ -32,6 +32,31 @@ abstract interface class VoicepipeSTT {
   Future<String> transcribe(Float32List segment16k);
 }
 
+/// Streaming speech-to-text: accepts partial transcripts while the user
+/// is still speaking, and finalizes when the utterance ends.
+///
+/// Unlike [VoicepipeSTT] which requires a complete audio segment,
+/// streaming STT processes audio frame-by-frame and returns partial
+/// results that improve as more audio arrives.
+abstract interface class VoicepipeStreamingSTT {
+  /// Feed a 16 kHz mono float frame (typically 512 samples = 32ms).
+  /// Returns a partial transcript that may improve with subsequent frames.
+  String acceptFrame(Float32List frame);
+
+  /// Finalize the current utterance and return the final transcript.
+  /// Called when VAD emits a completed segment. Resets internal state
+  /// for the next utterance.
+  String finalize();
+
+  /// Reset state for a new utterance (e.g. on barge-in).
+  void reset();
+
+  /// Set language hint for multilingual models (e.g. Nemotron 3.5).
+  /// [lang] — e.g. 'en-US', 'hi-IN', or 'auto' for auto-detection.
+  /// No-op for models that don't support language hints.
+  void setLanguage(String lang) {}
+}
+
 /// Text-to-speech output.
 class TtsAudio {
   final Float32List samples;

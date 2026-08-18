@@ -6,11 +6,16 @@ import 'config.dart';
 import 'screens/auth_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
+import 'services/platform_stt.dart';
 import 'state/auth_state.dart';
 import 'state/call_state.dart';
 import 'theme/app_theme.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glow_nav_bar.dart';
+
+/// Global platform STT instance — preloaded at app start so the first
+/// call doesn't wait for initialization.
+final PlatformSttService platformStt = PlatformSttService();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,6 +26,14 @@ Future<void> main() async {
       publishableKey: AppConfig.supabaseAnonKey,
     );
   }
+
+  // Preload platform STT in background (Apple/Web speech recognition).
+  // This avoids a delay on the first call.
+  platformStt.initialize().then((available) {
+    if (available) {
+      debugPrint('[main] platform STT preloaded OK');
+    }
+  });
 
   runApp(
     MultiProvider(

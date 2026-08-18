@@ -71,21 +71,59 @@ class VoiceCallController {
   bool _started = false;
   bool get isStarted => _started;
 
+  /// How long to wait for the peer connection to reach `connected` before
+  /// surfacing an error. Prevents a stuck ICE/answer from hanging the UI on
+  /// "Connecting to WebRTC" forever.
+  static const _connectTimeout = Duration(seconds: 20);
+
   Future<void> start() async {
     if (_started) return;
     _started = true;
     _phase.add(VoiceCallPhase.connecting);
 
     try {
-      // 1. microphone
+      // 1. signaling first: open the WebSocket BEFORE requesting the mic.
+      // On web, getUserMedia shows a permission prompt; if it is left
+      // unanswered, the browser does not resolve the future and the call
+      // would otherwise stall on "Connecting to WebRTC" with a healthy
+      // backend. Opening the signaling socket first means connectivity is
+      // verified independently, and a later mic failure produces a real
+      // error instead of a silent hang.
+      final ws = WebSocketChannel.connect(Uri.parse(signalingUrl));
+      _ws = ws;
+      ws.stream.listen(_onSignal, onError: (e) {
+        debugPrint('[voice_forge] signaling error: $e');
+        _phase.add(VoiceCallPhase.error);
+      }, onDone: () {
+        if (_started) _phase.add(VoiceCallPhase.error);
+      });
+
+      // 2. microphone
+      //
+      // Explicit AEC3 + noise suppression + AGC: on web the browser applies
+      // echo cancellation to this track (spec defaults are on, this makes it
+      // explicit); on mobile flutter_webrtc maps these into libwebrtc's audio
+      // processing module. The cleaned track is what gets sent over RTP, so
+      // the server's VAD/onset gate hears the echo-free signal too.
       final stream = await navigator.mediaDevices.getUserMedia({
-        'audio': true,
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
         'video': false,
       });
       _localStream = stream;
       _micEnabled = true;
 
-      // 2. peer connection
+      // Verify AEC actually engages on this platform (browsers may report
+      // false for some sink configurations).
+      final micTrack = stream.getAudioTracks().first;
+      try {
+        debugPrint('[voice_forge] mic track settings: ${micTrack.getSettings()}');
+      } catch (_) {}
+
+      // 3. peer connection
       final pc = await createPeerConnection({
         'iceServers': iceServers ??
             [
@@ -122,7 +160,7 @@ class VoiceCallController {
         }
       };
 
-      // 3. mic + data channel
+      // 4. mic + data channel
       pc.addTrack(stream.getAudioTracks().first, stream);
       final dc = await pc.createDataChannel(
           dataChannelLabel, RTCDataChannelInit());
@@ -135,23 +173,28 @@ class VoiceCallController {
         }
       });
 
-      // 4. signaling
-      final ws = WebSocketChannel.connect(Uri.parse(signalingUrl));
-      _ws = ws;
-      ws.stream.listen(_onSignal, onError: (e) {
-        debugPrint('[voice_forge] signaling error: $e');
-        _phase.add(VoiceCallPhase.error);
-      }, onDone: () {
-        if (_started) _phase.add(VoiceCallPhase.error);
-      });
-
       // 5. offer
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       ws.sink.add(jsonEncode({'type': 'offer', 'sdp': offer.sdp}));
+
+      // 6. connection watchdog: if ICE never connects, surface an error
+      //    instead of leaving the UI on "Connecting to WebRTC".
+      unawaited(_watchConnection());
     } catch (e) {
       _phase.add(VoiceCallPhase.error);
       rethrow;
+    }
+  }
+
+  Future<void> _watchConnection() async {
+    await Future<void>.delayed(_connectTimeout);
+    if (!_started) return;
+    if (_pc?.connectionState !=
+        RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+      debugPrint('[voice_forge] connection timed out; aborting');
+      _phase.add(VoiceCallPhase.error);
+      await end();
     }
   }
 

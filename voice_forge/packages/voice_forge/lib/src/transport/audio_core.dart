@@ -27,4 +27,8 @@ abstract interface class AudioCore {
   /// Extra fields merged into the `connected` signaling message
   /// (e.g. {"room": "clinic-abc123"}).
   Map<String, dynamic>? get connectionInfo => null;
+
+  /// Release per-call resources (event subscriptions, HTTP clients, streams).
+  /// Called by the transport when the peer session closes.
+  void dispose() {}
 }

@@ -11,9 +11,11 @@ import 'mic_tap.dart';
 /// ScriptProcessorNode and feeds the PCM into [BargeInDetector]. The graph
 /// ends in a zero-gain node so nothing is ever played back (no feedback).
 ///
-/// Caveat: the pipeline has no echo cancellation, so on speakers the mic
-/// also hears the agent's own TTS — use headphones or raise the detector's
-/// rmsThreshold (BARGE_IN_RMS_THRESHOLD) when testing on speakers.
+/// Caveat: this tap reads the post-AEC track — the mic's WebRTC track is
+/// captured with echoCancellation/noiseSuppression/autoGainControl on
+/// (see voice_call_controller). Residual echo can still slip through on
+/// loud speakers: use headphones or raise the detector's rmsThreshold
+/// (BARGE_IN_RMS_THRESHOLD) when testing on speakers.
 class _WebMicTap implements MicTap {
   web.AudioContext? _ctx;
   web.MediaStreamAudioSourceNode? _source;

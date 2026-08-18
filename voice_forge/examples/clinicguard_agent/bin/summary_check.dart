@@ -9,6 +9,8 @@ import 'dart:typed_data';
 
 import 'package:voice_forge/voice_forge.dart';
 
+import 'llm_config.dart';
+
 const _systemPrompt = '''
 You are "ClinicGuard", a multilingual clinical triage dispatcher for a
 primary-care clinic. Ask ONE short question at a time. Finish with a clear
@@ -16,8 +18,8 @@ recommendation. Never diagnose. Urgency: low/medium/high/emergency.
 ''';
 
 Future<void> main() async {
-  final llm = llmFromEnv(Platform.environment);
-  print('LLM: ${llm is EchoLlm ? "EchoLlm" : "OpenAI-compatible"}');
+  final llm = clinicGuardLlmFromEnv(Platform.environment);
+  print('LLM: ${llm.label}');
 
   final session = AgentSession(
     vad: _StubVad(),

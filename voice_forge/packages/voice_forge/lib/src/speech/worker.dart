@@ -59,11 +59,24 @@ class SpeechWorker {
     return result as TtsAudio;
   }
 
+  /// Per-request budget. A wedged worker isolate (or a request that is never
+  /// answered) must not hang the caller forever: on timeout the completer is
+  /// completed with a TimeoutException and dropped from _pending. Later
+  /// requests to a healthy worker still work.
+  static const _requestTimeout = Duration(seconds: 15);
+
   Future<Object?> _request(Map<String, Object?> request) {
     final id = _nextId++;
     final completer = Completer<Object?>();
     _pending[id] = completer;
     _requests!.send({'id': id, ...request});
+    Timer(_requestTimeout, () {
+      if (_pending.remove(id) != null && !completer.isCompleted) {
+        completer.completeError(
+          TimeoutException('speech worker request timed out', _requestTimeout),
+        );
+      }
+    });
     return completer.future;
   }
 
