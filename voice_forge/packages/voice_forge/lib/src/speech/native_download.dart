@@ -56,11 +56,14 @@ String _nativeFileName() {
 
 /// Where the auto-downloaded native library lives. Version-scoped so a
 /// bindings upgrade re-downloads instead of reusing a stale library.
+///
+/// Models and native binaries are stored inside the project directory
+/// (voice_forge/third_party/native/) by default to avoid filling up the
+/// system SSD. Override with VOICE_FORGE_NATIVE_DIR to use a custom path.
 String nativeCacheDir() {
   final base =
       Platform.environment['VOICE_FORGE_NATIVE_DIR'] ??
-      '${Platform.environment['HOME'] ?? Directory.current.path}'
-          '/.cache/voice_forge/native';
+      '${Directory.current.path}/third_party/native';
   return '$base/${Platform.operatingSystem}-${_arch()}-v$kNativeVersion';
 }
 

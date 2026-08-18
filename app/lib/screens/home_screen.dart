@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/api_client.dart';
+import '../services/platform_stt.dart';
 import '../state/auth_state.dart';
 import '../state/call_state.dart';
 import '../theme/app_theme.dart';
@@ -79,6 +80,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     icon: Icons.call_rounded,
                     glow: AppColors.neonCyan,
                     onPressed: () => _showPatientPicker(context),
+                  ),
+                  const SizedBox(height: 16),
+                  // STT settings toggle.
+                  Builder(
+                    builder: (context) {
+                      final callState = context.watch<CallState>();
+                      return _SttSettingsRow(state: callState);
+                    },
                   ),
                   const SizedBox(height: 24),
                   // Quick suggestion chips
@@ -227,7 +236,15 @@ class _HomeScreenState extends State<HomeScreen> {
     String statusLabel,
     Color statusColor,
   ) {
-    final lastLine = state.transcript.isNotEmpty ? state.transcript.last : null;
+    TranscriptLine? lastUserLine;
+    TranscriptLine? lastAssistantLine;
+    for (final line in state.transcript.reversed) {
+      if (lastUserLine == null && line.role == 'user') lastUserLine = line;
+      if (lastAssistantLine == null && line.role == 'assistant') {
+        lastAssistantLine = line;
+      }
+      if (lastUserLine != null && lastAssistantLine != null) break;
+    }
 
     return Center(
       key: const ValueKey('voiceFocus'),
@@ -248,75 +265,25 @@ class _HomeScreenState extends State<HomeScreen> {
               level: state.micLevel,
             ),
             const SizedBox(height: 32),
-            // Floating live subtitle card with latest speech turn
-            if (lastLine != null)
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceGlassStrong,
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(
-                    color: lastLine.role == 'user'
-                        ? AppColors.neonCyan.withValues(alpha: 0.35)
-                        : AppColors.borderGlassStrong,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.3),
-                      blurRadius: 18,
+            // Show both sides of the conversation — not just the last line,
+            // which hid the user's words once the assistant started replying.
+            if (lastUserLine != null || lastAssistantLine != null)
+              Column(
+                children: [
+                  if (lastUserLine != null)
+                    _VoiceFocusSubtitle(
+                      line: lastUserLine,
+                      isAgentSpeaking: false,
                     ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          lastLine.role == 'user'
-                              ? Icons.account_circle_outlined
-                              : Icons.health_and_safety_outlined,
-                          size: 14,
-                          color: lastLine.role == 'user'
-                              ? AppColors.neonCyan
-                              : AppColors.auroraFuchsia,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          lastLine.role == 'user' ? 'You said:' : 'ClinicGuard AI:',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: lastLine.role == 'user'
-                                ? AppColors.neonCyan
-                                : AppColors.inkMuted,
-                          ),
-                        ),
-                        if (state.agentState == 'speaking' && lastLine.role == 'assistant') ...[
-                          const SizedBox(width: 8),
-                          const VoiceWaveVisualizer(
-                            width: 24,
-                            height: 10,
-                            barCount: 3,
-                            color: AppColors.auroraFuchsia,
-                          ),
-                        ],
-                      ],
+                  if (lastUserLine != null && lastAssistantLine != null)
+                    const SizedBox(height: 12),
+                  if (lastAssistantLine != null)
+                    _VoiceFocusSubtitle(
+                      line: lastAssistantLine,
+                      isAgentSpeaking:
+                          state.agentState == 'speaking',
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      lastLine.text,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        height: 1.4,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                  ],
-                ),
+                ],
               )
             else
               Text(
@@ -384,6 +351,89 @@ class _HomeScreenState extends State<HomeScreen> {
         if (state.summary != null) SummaryCard(summary: state.summary!),
         _BookingCard(state: state),
       ],
+    );
+  }
+}
+
+class _VoiceFocusSubtitle extends StatelessWidget {
+  const _VoiceFocusSubtitle({
+    required this.line,
+    required this.isAgentSpeaking,
+  });
+
+  final TranscriptLine line;
+  final bool isAgentSpeaking;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = line.role == 'user';
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceGlassStrong,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(
+          color: isUser
+              ? AppColors.neonCyan.withValues(alpha: 0.35)
+              : AppColors.borderGlassStrong,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.3),
+            blurRadius: 18,
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isUser
+                    ? Icons.account_circle_outlined
+                    : Icons.health_and_safety_outlined,
+                size: 14,
+                color: isUser ? AppColors.neonCyan : AppColors.auroraFuchsia,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isUser ? 'You said:' : 'ClinicGuard AI:',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isUser ? AppColors.neonCyan : AppColors.inkMuted,
+                ),
+              ),
+              if (isAgentSpeaking && !isUser) ...[
+                const SizedBox(width: 8),
+                const VoiceWaveVisualizer(
+                  width: 24,
+                  height: 10,
+                  barCount: 3,
+                  color: AppColors.auroraFuchsia,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            line.text,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              height: 1.4,
+              fontWeight: FontWeight.w500,
+              color: isUser && !line.isFinal
+                  ? AppColors.inkMuted
+                  : AppColors.ink,
+              fontStyle:
+                  isUser && !line.isFinal ? FontStyle.italic : FontStyle.normal,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -721,7 +771,8 @@ class _PatientPickerSheetState extends State<_PatientPickerSheet> {
   }
 
   void _retry() {
-    setState(() => _patientsFuture = ApiClient().fetchPatients());
+    _patientsFuture = ApiClient().fetchPatients();
+    setState(() {});
   }
 
   Future<void> _createPatient() async {
@@ -897,21 +948,26 @@ class _PatientPickerSheetState extends State<_PatientPickerSheet> {
                     )
                   else
                     for (final p in patients) _PatientTile(patient: p),
-                  const Divider(color: AppColors.borderGlass),
-                  ListTile(
-                    leading: const CircleAvatar(
-                      radius: 22,
-                      backgroundColor: AppColors.surfaceGlass,
-                      child: Icon(Icons.person_off_outlined, color: AppColors.inkMuted),
+                  // Signed-in users must pick (or create) a patient profile so
+                  // the agent greets them by name; only guests can call without
+                  // a profile.
+                  if (!auth.isSignedIn) ...[
+                    const Divider(color: AppColors.borderGlass),
+                    ListTile(
+                      leading: const CircleAvatar(
+                        radius: 22,
+                        backgroundColor: AppColors.surfaceGlass,
+                        child: Icon(Icons.person_off_outlined, color: AppColors.inkMuted),
+                      ),
+                      title: const Text('Call as guest', style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('No profile required', style: TextStyle(color: AppColors.inkMuted, fontSize: 12)),
+                      onTap: () {
+                        final call = context.read<CallState>();
+                        Navigator.pop(context);
+                        unawaited(call.startCall());
+                      },
                     ),
-                    title: const Text('Call as guest', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('No profile required', style: TextStyle(color: AppColors.inkMuted, fontSize: 12)),
-                    onTap: () {
-                      final call = context.read<CallState>();
-                      Navigator.pop(context);
-                      unawaited(call.startCall());
-                    },
-                  ),
+                  ],
                 ],
               );
             },
@@ -969,6 +1025,109 @@ class _PatientTile extends StatelessWidget {
         Navigator.pop(context);
         unawaited(call.startCall(patientId: patient['id']?.toString()));
       },
+    );
+  }
+}
+
+/// Row with STT toggle and language selector.
+/// Shown on the idle home screen before starting a call.
+class _SttSettingsRow extends StatefulWidget {
+  final CallState state;
+  const _SttSettingsRow({required this.state});
+
+  @override
+  State<_SttSettingsRow> createState() => _SttSettingsRowState();
+}
+
+class _SttSettingsRowState extends State<_SttSettingsRow> {
+  List<SttLocale> _locales = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocales();
+  }
+
+  Future<void> _loadLocales() async {
+    final locales = await widget.state.getSttLocales();
+    if (mounted) {
+      setState(() {
+        _locales = locales.isNotEmpty
+            ? locales
+            : [
+                const SttLocale(localeId: '', name: 'Auto (Device Default)'),
+                const SttLocale(localeId: 'en-IN', name: 'English (India)'),
+                const SttLocale(localeId: 'en-US', name: 'English (US)'),
+                const SttLocale(localeId: 'hi-IN', name: 'Hindi (India)'),
+              ];
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final callState = widget.state;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceGlass,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.borderGlass),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.mic_rounded, size: 18, color: AppColors.neonCyan),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Use device speech recognition',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+              ),
+              Switch(
+                value: callState.usePlatformStt,
+                onChanged: (v) => callState.setUsePlatformStt(v),
+                activeThumbColor: AppColors.neonCyan,
+              ),
+            ],
+          ),
+          if (callState.usePlatformStt) ...[
+            const Divider(height: 16, color: AppColors.borderGlass),
+            Row(
+              children: [
+                const Icon(Icons.language_rounded, size: 18, color: AppColors.inkMuted),
+                const SizedBox(width: 8),
+                const Text('Language:', style: TextStyle(fontSize: 13)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _loading
+                      ? const Text('Loading...', style: TextStyle(fontSize: 13, color: AppColors.inkMuted))
+                      : DropdownButton<String>(
+                          value: callState.sttLocaleId,
+                          isExpanded: true,
+                          underline: const SizedBox(),
+                          dropdownColor: AppColors.surfaceGlassStrong,
+                          style: const TextStyle(fontSize: 13, color: AppColors.onGradient),
+                          items: _locales.map((l) {
+                            return DropdownMenuItem(
+                              value: l.localeId,
+                              child: Text(l.name),
+                            );
+                          }).toList(),
+                          onChanged: (v) {
+                            if (v != null) callState.setSttLocale(v);
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

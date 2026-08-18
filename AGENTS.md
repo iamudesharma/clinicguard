@@ -20,7 +20,13 @@ auto-download on Linux; models cached), `app` (flutter analyze/test), `server`
 ```bash
 # setup (once, from voice_forge/):
 ./scripts/fetch_native.sh      # libsherpa-onnx-c-api (prebuilt)
-./scripts/fetch_models.sh      # silero VAD + whisper tiny + piper (to models/)
+./scripts/fetch_models.sh      # silero VAD + whisper base + piper + streaming zipformer (to models/)
+
+# Model storage: ALL models and native binaries are stored inside the project
+# directory (voice_forge/models/ and voice_forge/third_party/native/) to avoid
+# filling up the system SSD. Override with VOICE_FORGE_NATIVE_DIR env var.
+# The default cache path is: voice_forge/third_party/native/<os>-<arch>-v<version>/
+# Models live in: voice_forge/models/ (gitignored, ~130 MB total)
 
 # ClinicGuard triage agent (from voice_forge/examples/clinicguard_agent):
 dart run bin/agent.dart            # the agent the app connects to (ws://:8765/signal)
@@ -50,7 +56,7 @@ dart run bin/server.dart            # transport-only loopback server
 dart run bin/self_test.dart         # WebRTC loopback -> RESULT: PASS
 
 # framework unit tests (from voice_forge/packages/voice_forge):
-dart test && dart analyze           # 31 tests, keep green
+dart test && dart analyze           # 44 tests, keep green
 
 # client (from voice_forge/examples/poc_client):
 flutter run -d chrome               # mic -> agent -> TTS in the browser
@@ -59,10 +65,55 @@ flutter test / flutter analyze      # keep green after any change
 
 Notes: the agent needs `models/` + `third_party/native/` (gitignored, fetched
 by the scripts). Standalone users don't — `SherpaKit.load()` auto-downloads
-the native library (cache: `~/.cache/voice_forge/native/`, override
+the native library into the project directory at
+`voice_forge/third_party/native/<os>-<arch>-v<version>/` (override with
 `VOICE_FORGE_NATIVE_DIR`) and missing standard models on first run
-(`autoDownload: false` opts out). The agent runs from the example dirs
-(relative model paths).
+(`autoDownload: false` opts out). All models and native binaries are stored
+inside the project directory to avoid filling up the system SSD. The agent
+runs from the example dirs (relative model paths).
+
+## Latency optimizations (voice_forge)
+
+The voice pipeline has 7 optimizations implemented across 3 phases:
+
+### Phase 1 — Quick wins
+- **O3 LLM prefix caching**: system prompt is anchored at position 0 and
+  byte-identical across turns; providers (Groq, Gemini) cache server-side,
+  cutting TTFT by 200-400ms on turns 2+.
+- **O7 Client buffer tuning**: WebRTC audio receiver configured for low-latency
+  with high-priority encoding (80-150ms jitter buffer vs default 200-500ms).
+- **O4 Streaming LLM→TTS**: clause-level splitting (commas, conjunctions) in
+  addition to sentence endings; TTS starts ~100-300ms earlier on multi-clause
+  replies. Fallback threshold reduced from 300→200 chars.
+
+### Phase 2 — Medium effort
+- **O2 Semantic endpointing**: short utterances (< 1.5s) after non-merging
+  turns skip the merge window entirely (100ms vs 200-450ms). Self-contained
+  one-liner responses reach the LLM faster.
+- **O5 Tool prefetch**: appointment slots are prefetched at session start;
+  `get_available_slots` tool call returns instantly from cache instead of
+  making a live HTTP request (saves 200-400ms on booking turns).
+
+### Phase 3 — Framework changes
+- **O1 Streaming STT**: Zipformer transducer streaming model
+  (`sherpa-onnx-streaming-zipformer-en-2023-06-26`, int8, ~70 MB) runs
+  alongside Silero VAD, emitting partial transcripts as the user speaks.
+  The LLM can start processing before the utterance ends. Falls back to
+  batch Whisper when the streaming model is not available. Model is
+  downloaded by `fetch_models.sh`.
+- **O6 Intent cache**: keyword-based LRU cache (50 entries, 30min TTL) stores
+  LLM response text for repeated triage queries. Cache hits skip the LLM
+  entirely and go straight to TTS (saves 200-700ms). Enable with
+  `session.enableIntentCache()` (on by default in the ClinicGuard agent;
+  turns that used tool calls are never cached — no stale bookings).
+
+### Expected latency after all optimizations
+| Scenario | Before | After |
+|----------|--------|-------|
+| Normal turn | ~1.5s | ~0.5-0.7s |
+| Booking turn | ~2.5s | ~0.8-1.0s |
+| Cache hit | ~1.5s | ~0.3-0.5s |
+| First turn (cold) | ~2.0s | ~0.8-1.0s |
 LLM comes from env with automatic failover, in this order: **Cline first**
 (`CLINE_API_KEY`, `CLINE_MODEL`, default `poolside/laguna-s-2.1:free`, base
 `https://api.cline.bot/api/v1` — note Cline wraps responses in a `data`
@@ -93,7 +144,11 @@ paying a wasted round trip every turn. The explicit
 `VOICE_FORGE_LLM_BASE_URL/API_KEY/MODEL` trio overrides the whole chain.
 `VOICE_FORGE_LLM_TIMEOUT_SECONDS` (default 45) raises the
 per-call LLM timeout — needed for slow free-tier providers (e.g. OpenRouter
-`:free` models). `VOICE_FORGE_WHISPER_MODEL=tiny|base` picks the STT model.
+`:free` models). `VOICE_FORGE_WHISPER_MODEL=tiny|base` picks the STT model (default `base`).
+`VOICE_FORGE_WHISPER_LANG=en|hi|...` sets Whisper's language hint (default `en`;
+  set to `hi` for Hindi, or `''` for auto-detect). Explicit language skips
+  Whisper's ~1s auto-detection and improves accuracy for accented speech.
+`VOICE_FORGE_WHISPER_TASK=transcribe|translate` (default `transcribe`).
 Agent speech stack is sherpa-onnx (vendored pure-Dart bindings in
 `packages/voice_forge_speech`, published as its own package; the `voice_forge`
 package uses it via a temporary `dependency_overrides` path until it's live
@@ -152,7 +207,7 @@ exposing them.
 
 ## App gotchas
 
-- Barge-in (interrupting the agent mid-speech, ChatGPT-style) has three layers: (1) the server's Silero VAD queues your interrupted utterance and still answers it; (2) the agent's instant onset gate (`AgentSession` bargeInRmsThreshold/OnsetFrames, default ~64ms) stops TTS as soon as you start talking — works for every client; (3) on web the app taps the mic PCM (`lib/vad/mic_tap_web.dart` + `barge_in_detector.dart`, both pure Dart by design — no native/Rust code, ever) and sends `{"event":"barge_in"}` the moment speech onset is detected while the agent is speaking (`CallState` arms the detector only in the `speaking` state). No AEC in the pipeline: on speakers the mic hears the agent's TTS — use headphones or raise `--dart-define=BARGE_IN_RMS_THRESHOLD` (default 0.025). In `agent_session.dart`, barge-in also drops *stale* turns: segments captured before a new utterance began are dropped (never sent to the LLM ahead of the new speech), and segments that pause briefly (~450 ms) are audio-merged into a single LLM turn instead of being answered one chunk at a time.
+- Barge-in (interrupting the agent mid-speech, ChatGPT-style) has three layers: (1) the server's Silero VAD queues your interrupted utterance and still answers it; (2) the agent's instant onset gate (`AgentSession` bargeInRmsThreshold/OnsetFrames, default ~64ms) stops TTS as soon as you start talking — works for every client; (3) on web the app taps the mic PCM (`lib/vad/mic_tap_web.dart` + `barge_in_detector.dart`, both pure Dart by design — no native/Rust code, ever) and sends `{"event":"barge_in"}` the moment speech onset is detected while the agent is speaking (`CallState` arms the detector only in the `speaking` state). The mic track is captured with explicit AEC3 + noise suppression + AGC (`voice_forge_flutter` `voice_call_controller.dart` — browser AEC on web, libwebrtc APM on mobile; the cleaned signal is what reaches the server's VAD), and the controller logs `track.getSettings()` at call start to verify AEC engaged. Residual echo on loud speakers: use headphones or raise `--dart-define=BARGE_IN_RMS_THRESHOLD` (default 0.025). In `agent_session.dart`, barge-in also drops *stale* turns: segments captured before a new utterance began are dropped (never sent to the LLM ahead of the new speech), and segments that pause briefly (~450 ms) are audio-merged into a single LLM turn instead of being answered one chunk at a time.
 - Data-channel contract between app and agent (keep `app/lib/state/call_state.dart` and `voice_forge/examples/clinicguard_agent/bin/agent.dart` in sync): the agent publishes JSON on the `agent.events` data channel with a `type` field (`user_transcript`, `assistant_text`, `agent_state`, `summary` — optionally with `patient_id` — `booking_confirmed` with a `booking` object, plus `connected` with the room id); the app may send `{"event":"barge_in"}` / `{"event":"end_call"}` / `{"event":"patient_id","patient_id":"PAT-..."}` (the agent then loads the chart from `GET /patients/{id}`, injects it as LLM system context and greets the patient by name) on the same channel. Duplicate `patient_id` messages are ignored after the first. `booking_confirmed` may now fire *mid-call* (the LLM books via tool calling when the patient asks) instead of only at call end — the app already handles both.
 - Tool calling lives in `voice_forge/packages/voice_forge/lib/src/llm/llm.dart` (`ToolDef`, `LlmToolCall`, `LlmReply`, `replyWithTools`) with the tool loop + per-turn knowledge injection in `agent_session.dart` (`configure(tools:, toolExecutor:, knowledgeProvider:)`); the ClinicGuard tools (`get_available_slots`, `book_appointment`, `search_knowledge`) and RAG retrieval are wired in `examples/clinicguard_agent/bin/agent.dart`. If the provider rejects `tools`, the session falls back to plain chat completions automatically. Booking mid-call sets a flag so the post-call `_maybeBookAppointment` JSON path is skipped.
 - `lib/config.dart` holds `API_BASE_URL` (FastAPI control plane), `VOICE_FORGE_SIGNALING_URL` (voice_forge agent), Supabase URL + anon key — all overridable via `--dart-define`; the Supabase key is publishable by design, do not treat as secrets.

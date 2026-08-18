@@ -14,3 +14,6 @@ dependencies:
   opus_codec_dart: ^3.0.5
   voice_forge:
     path: ../../packages/voice_forge
+
+dev_dependencies:
+  test: ^1.25.0

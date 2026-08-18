@@ -22,6 +22,7 @@ class VoiceAgent {
   final VoicepipeSTT stt;
   final VoicepipeTTS tts;
   final VoicepipeLlm llm;
+  final VoicepipeStreamingSTT? streamingStt;
   final String? systemPrompt;
 
   VoiceAgent({
@@ -29,6 +30,7 @@ class VoiceAgent {
     required this.stt,
     required this.tts,
     required this.llm,
+    this.streamingStt,
     this.systemPrompt,
   });
 
@@ -39,6 +41,7 @@ class VoiceAgent {
     stt: stt,
     tts: tts,
     llm: llm,
+    streamingStt: streamingStt,
     systemPrompt: systemPrompt,
   );
 }

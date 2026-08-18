@@ -51,6 +51,12 @@ class _FakeTts implements VoicepipeTTS {
   }
 }
 
+/// TTS whose synthesize never completes — simulates a wedged worker isolate.
+class _HangingTts implements VoicepipeTTS {
+  @override
+  Future<TtsAudio> synthesize(String text) => Completer<TtsAudio>().future;
+}
+
 class _FakeLlm implements VoicepipeLlm {
   final List<ChatMessage> seen = [];
   final String replyText;
@@ -58,6 +64,10 @@ class _FakeLlm implements VoicepipeLlm {
   final bool rejectTools;
   final Completer<void>? gate; // await before replying, when set
   bool _toolCallsFired = false;
+
+  @override
+  String get label => 'FakeLlm';
+
   _FakeLlm([
     this.replyText = 'tell me more about your symptoms',
     this.toolCalls = const [],
@@ -108,6 +118,37 @@ class _FakeLlm implements VoicepipeLlm {
     }
     return reply;
   }
+}
+
+/// Streaming STT that records every acceptFrame call and returns scripted
+/// final texts. Mirrors the real recognizer lifecycle (reset -> frames ->
+/// finalize) so we can assert the session feeds it the post-barge-in audio.
+class _RecordingStreamingStt implements VoicepipeStreamingSTT {
+  final List<int> framesFed = []; // acceptFrame call count, grows over time
+  int _finalizeCount = 0;
+  final List<String> finalTexts;
+
+  _RecordingStreamingStt([this.finalTexts = const ['my name is priya']]);
+
+  @override
+  String acceptFrame(Float32List frame) {
+    framesFed.add(1);
+    return '';
+  }
+
+  @override
+  String finalize() {
+    final text =
+        _finalizeCount < finalTexts.length ? finalTexts[_finalizeCount] : '';
+    _finalizeCount++;
+    return text;
+  }
+
+  @override
+  void reset() {}
+
+  @override
+  void setLanguage(String lang) {}
 }
 
 /// Poll until [session] reaches [state] (turn starts after the merge window).
@@ -465,5 +506,138 @@ void main() {
       1, // user message recorded, but the assistant reply never was
     );
     session.dispose();
+  });
+
+  test(
+    'streaming STT keeps receiving frames after a barge-in (regression: '
+    'post-interrupt utterance is not starved)',
+    () async {
+      final gate = Completer<void>();
+      final llm = _FakeLlm('answer to the new utterance', const [], false, gate);
+      final tts = _FakeTts();
+      // First finalize = the interrupted turn; second = the new utterance.
+      final streamStt = _RecordingStreamingStt(
+        ['first utterance', 'new utterance text'],
+      );
+      final session = AgentSession(
+        vad: _FakeVad(perCall: 1, pendingSegments: 3), // one segment per burst
+        stt: _FakeStt(),
+        tts: tts,
+        llm: llm,
+        streamingStt: streamStt,
+      );
+      final events = <Map<String, dynamic>>[];
+      session.events.listen((e) => events.add(e.payload));
+
+      // Start a turn so the agent is busy (processing), then interrupt.
+      session.onAudio(Int16List(1920 * 3));
+      await waitForState(session, AgentState.thinking);
+      session.interrupt();
+      gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      final framesBefore = streamStt.framesFed.length;
+
+      // The user keeps talking after the interrupt: feed loud audio (as the
+      // VAD would during a real utterance).
+      final loud = Int16List(1920 * 3);
+      for (var i = 0; i < loud.length; i++) {
+        loud[i] = i.isEven ? 6000 : -6000;
+      }
+      session.onAudio(loud);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      // Frames must keep flowing into the recognizer after the interrupt;
+      // the old `!_interrupt` guard starved it and the turn was lost.
+      expect(streamStt.framesFed.length, greaterThan(framesBefore));
+
+      // The new utterance's final text reaches the LLM and is spoken.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(
+        llm.seen.any((m) => m.role == 'user' && m.content == 'new utterance text'),
+        isTrue,
+        reason: 'post-barge-in utterance must be transcribed and sent to the LLM',
+      );
+      expect(tts.spoken, isNotEmpty);
+      session.dispose();
+    },
+  );
+
+  test('TTS synthesis timeout does not hang the turn in speaking', () async {
+    final llm = _FakeLlm('a reply that can never be spoken');
+    // A TTS whose synthesize never completes: the wedged-worker case.
+    final hangingTts = _HangingTts();
+    final events = <Map<String, dynamic>>[];
+    final session = AgentSession(
+      vad: _FakeVad(),
+      stt: _FakeStt(),
+      tts: hangingTts,
+      llm: llm,
+      ttsTimeout: const Duration(milliseconds: 50),
+    );
+    session.events.listen((e) => events.add(e.payload));
+
+    session.onAudio(Int16List(1920 * 3));
+    // The turn should error out and return to listening instead of hanging.
+    await waitForState(session, AgentState.thinking);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(
+      events.any((e) => e['type'] == 'agent_error'),
+      isTrue,
+      reason: 'a wedged TTS must surface as an agent_error',
+    );
+    expect(session.state, AgentState.listening);
+    session.dispose();
+  });
+
+  test('TtsChunker does not cut on "to"/"and" the way the old splitter did', () {
+    final chunker = TtsChunker();
+    // Token-sized chunks, as a streaming LLM emits them.
+    const tokens = [
+      "I'm ",
+      'sorry ',
+      'to ',
+      'hear ',
+      'that ',
+      'you ',
+      'have ',
+      'been ',
+      'feeling ',
+      'unwell ',
+      'today ',
+      'and ',
+      'I ',
+      'need ',
+      'to ',
+      'ask ',
+      'a ',
+      'few ',
+      'questions.',
+    ];
+    final pieces = <TtsPiece>[];
+    for (final t in tokens) {
+      pieces.addAll(chunker.add(t));
+    }
+    final rest = chunker.flush();
+    if (rest != null) pieces.add(rest);
+
+    expect(
+      pieces.map((p) => p.text).toList(),
+      ["I'm sorry to hear that you have been feeling unwell today and I need to ask a few questions."],
+    );
+    expect(pieces.single.reason, 'sentence');
+  });
+
+  test('TtsChunker waits for sentence end instead of comma splits', () {
+    final chunker = TtsChunker();
+    expect(chunker.add('Hello, how are you'), isEmpty);
+
+    final pieces = chunker.add(
+      ' doing today. I would like to know more about the pain.',
+    );
+    expect(pieces.length, 2);
+    expect(pieces.first.reason, 'sentence');
+    expect(pieces.first.text, 'Hello, how are you doing today.');
+    expect(pieces.last.text, 'I would like to know more about the pain.');
   });
 }

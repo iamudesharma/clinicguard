@@ -3,20 +3,8 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:http/http.dart' as http;
-
-/// Random UUID v4 (OpenCode Zen wants per-request x-opencode-* ids).
-String _uuidV4() {
-  final rng = Random.secure();
-  final bytes = List<int>.generate(16, (_) => rng.nextInt(256));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
-  final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
-      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
-}
 
 /// Crash-proof log: piped stdout can throw "StreamSink is bound to a stream"
 /// under backpressure; never let a log line break the turn flow.
@@ -85,6 +73,9 @@ class LlmReply {
 
 /// Minimal LLM contract: prompt -> text reply (plus optional tool calling).
 abstract interface class VoicepipeLlm {
+  /// Human-readable provider label for startup logging.
+  String get label;
+
   /// [maxTokens] overrides the instance default for this call (0 disables).
   Future<String> reply(List<ChatMessage> history, {int? maxTokens});
 
@@ -117,9 +108,11 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
   final Duration timeout;
   final String name;
   final Map<String, String> _extraHeaders;
-  final String _sessionId;
-  final String _projectId;
+  final Map<String, String> Function()? _requestHeaders;
   final http.Client _client;
+
+  @override
+  String get label => 'OpenAI-compatible ($name)';
 
   OpenAiCompatibleLlm({
     required String baseUrl,
@@ -130,38 +123,22 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     this.timeout = const Duration(seconds: 45),
     String? name,
     Map<String, String>? extraHeaders,
+    this._requestHeaders,
     http.Client? client,
   }) : _client = client ?? http.Client(),
        // Strip trailing slashes: providers document base URLs like
        // ".../v1beta/openai/" and appending "/chat/completions" would 404.
        baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
        name = (name == null || name.isEmpty) ? model : name,
-       _extraHeaders = extraHeaders ?? const {},
-       _sessionId = _uuidV4(),
-       _projectId = _uuidV4();
-
-  /// OpenCode Zen routes/validates requests by these client headers; without
-  /// them it answers `FreeUsageLimitError` even with a valid key.
-  static const _opencodeHeaders = {
-    'x-opencode-client': 'cli',
-    'User-Agent': 'opencode/latest/cli',
-  };
+       _extraHeaders = extraHeaders ?? const {};
 
   Map<String, String> _headers() {
-    final headers = <String, String>{
+    return {
       'Authorization': 'Bearer $apiKey',
       'Content-Type': 'application/json',
       ..._extraHeaders,
+      if (_requestHeaders != null) ..._requestHeaders(),
     };
-    if (baseUrl.contains('opencode.ai')) {
-      headers.addAll({
-        ..._opencodeHeaders,
-        'x-opencode-session': _sessionId,
-        'x-opencode-project': _projectId,
-        'x-opencode-request': _uuidV4(),
-      });
-    }
-    return headers;
   }
 
   @override
@@ -312,14 +289,48 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
       );
     }
     if (_isEventStream(res.headers)) {
-      return _parseSse(
-        res.stream,
-        onPartial: onPartial,
-        onFirstToken: onFirstToken,
-      );
+      try {
+        return await _parseSse(
+          res.stream,
+          onPartial: onPartial,
+          onFirstToken: onFirstToken,
+        );
+      } on _RetryNonStreaming {
+        _safeLog(
+          '[voice_forge] llm-stream: $name streamed only reasoning; '
+          'retrying as a plain request',
+        );
+        return _plainRequest(history, tools: tools, maxTokens: maxTokens);
+      }
     }
     final jsonBody = await http.Response.fromStream(res);
     return _parseJsonReply(jsonDecode(jsonBody.body) as Map<String, dynamic>);
+  }
+
+  /// Plain (non-streaming) completion request; used for the reasoning-only
+  /// retry so a dropped content phase doesn't kill a healthy provider.
+  Future<LlmReply> _plainRequest(
+    List<ChatMessage> history, {
+    List<ToolDef>? tools,
+    int? maxTokens,
+  }) async {
+    final uri = Uri.parse('$baseUrl/chat/completions');
+    final res = await _client
+        .post(
+          uri,
+          headers: _headers(),
+          body: jsonEncode(
+            _requestBody(history, tools: tools, maxTokens: maxTokens),
+          ),
+        )
+        .timeout(timeout);
+    if (res.statusCode != 200) {
+      throw LlmException(
+        '${res.statusCode}: '
+        '${res.body.length > 200 ? res.body.substring(0, 200) : res.body}',
+      );
+    }
+    return _parseJsonReply(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   /// Parses SSE lines from a streaming chat-completions response: accumulates
@@ -336,6 +347,7 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     final rawBody = StringBuffer();
     var sawDelta = false;
     var sawContent = false;
+    var sawReasoning = false;
 
     try {
       await for (final line
@@ -376,6 +388,10 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
         }
         // Reasoning deltas (`reasoning_content` / `reasoning`) are never
         // spoken: only `content` above is accumulated.
+        final reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+        if (reasoning is String && reasoning.isNotEmpty) {
+          sawReasoning = true;
+        }
         final rawCalls = delta['tool_calls'];
         if (rawCalls is List) {
           for (final raw in rawCalls) {
@@ -408,6 +424,12 @@ class OpenAiCompatibleLlm implements VoicepipeLlm {
     // delta was ever consumed but the accumulated data is valid JSON, parse
     // it exactly like a non-streaming response.
     if (!sawDelta) {
+      if (sawReasoning) {
+        // The stream delivered thinking chunks but its content phase was
+        // dropped (upstream hiccup). The provider is healthy, so retry as a
+        // plain request rather than failing it over.
+        throw _RetryNonStreaming();
+      }
       final raw = rawBody.toString();
       if (raw.isNotEmpty) {
         try {
@@ -532,6 +554,9 @@ class EchoLlm implements VoicepipeLlm {
   ]);
 
   @override
+  String get label => 'EchoLlm (offline)';
+
+  @override
   Future<String> reply(List<ChatMessage> history, {int? maxTokens}) async =>
       replyText;
 
@@ -564,6 +589,9 @@ class FallbackLlm implements VoicepipeLlm {
   final int failureThreshold;
   final Duration cooldown;
 
+  @override
+  String get label => '${primary.label} -> ${fallback.label}';
+
   int _consecutiveFailures = 0;
   DateTime? _primaryDownUntil;
   Duration _rateLimitCooldown = const Duration(minutes: 5);
@@ -582,6 +610,15 @@ class FallbackLlm implements VoicepipeLlm {
   /// for the day stops costing latency on every call.
   static final RegExp _rateLimit = RegExp(
     r'429|rate.?limit|quota',
+    caseSensitive: false,
+  );
+
+  /// 5xx / upstream errors (e.g. OpenCode Zen's free endpoints answering
+  /// "503: Endpoint is unavailable") mean the provider is unavailable for a
+  /// while, not merely unlucky — mark it down immediately like a rate limit
+  /// instead of paying a wasted round trip on every turn.
+  static final RegExp _serverError = RegExp(
+    r'5\d\d|server_error|endpoint is unavailable|upstream request failed',
     caseSensitive: false,
   );
 
@@ -606,6 +643,7 @@ class FallbackLlm implements VoicepipeLlm {
         '[voice_forge] LLM call failed after ${sw.elapsedMilliseconds}ms: $e',
       );
       final rateLimited = _rateLimit.hasMatch('$e');
+      final serverDown = !rateLimited && _serverError.hasMatch('$e');
       if (rateLimited && _consecutiveFailures < 2) {
         // Transient burst quota (e.g. Google's 429s recover in seconds):
         // retry the primary once before treating it as exhausted. A second
@@ -614,10 +652,11 @@ class FallbackLlm implements VoicepipeLlm {
         await Future<void>.delayed(const Duration(milliseconds: 1500));
         return _run(call, onFallback);
       }
-      if (rateLimited || _consecutiveFailures >= failureThreshold) {
-        // Rate limits mark the provider down immediately (longer cooldown);
-        // other errors wait for failureThreshold consecutive failures.
-        if (rateLimited) {
+      if (rateLimited || serverDown || _consecutiveFailures >= failureThreshold) {
+        // Rate limits and 5xx server errors mark the provider down
+        // immediately (longer cooldown); other errors wait for
+        // failureThreshold consecutive failures.
+        if (rateLimited || serverDown) {
           _primaryDownUntil = DateTime.now().add(_rateLimitCooldown);
           if (_rateLimitCooldown < const Duration(minutes: 60)) {
             _rateLimitCooldown *= 2;
@@ -628,8 +667,9 @@ class FallbackLlm implements VoicepipeLlm {
         _consecutiveFailures = 0;
         _safeLog(
           '[voice_forge] LLM provider down after ${sw.elapsedMilliseconds}ms'
-          '${rateLimited ? ' (rate limited)' : ''}; switching to fallback '
-          'for ${(rateLimited ? _rateLimitCooldown ~/ 2 : cooldown).inSeconds}s',
+          '${rateLimited ? ' (rate limited)' : serverDown ? ' (server error)' : ''}; '
+          'switching to fallback '
+          'for ${(rateLimited || serverDown ? _rateLimitCooldown ~/ 2 : cooldown).inSeconds}s',
         );
       }
       return onFallback();
@@ -672,12 +712,20 @@ class LlmException implements Exception {
   String toString() => 'LlmException: $message';
 }
 
+/// Internal signal: a streaming response carried only reasoning chunks (no
+/// content). The provider is healthy — the content phase was dropped — so
+/// the caller retries once as a plain request instead of failing over.
+class _RetryNonStreaming implements Exception {}
+
 VoicepipeLlm _openAiCompatible(
   Map<String, String> env,
   String base,
   String key,
   String model, {
   double temperature = 0.3,
+  Map<String, String>? extraHeaders,
+  Map<String, String> Function()? requestHeaders,
+  String? name,
 }) {
   final timeoutSeconds =
       int.tryParse(env['VOICE_FORGE_LLM_TIMEOUT_SECONDS'] ?? '') ?? 45;
@@ -685,131 +733,37 @@ VoicepipeLlm _openAiCompatible(
     baseUrl: base,
     apiKey: key,
     model: model,
+    name: name,
     temperature: temperature,
+    extraHeaders: extraHeaders,
+    requestHeaders: requestHeaders,
     timeout: Duration(seconds: timeoutSeconds),
   );
 }
 
-/// Build the agent's LLM from environment variables.
-///
-/// Default provider order (unless the explicit `VOICE_FORGE_LLM_*` trio is set):
-///   1. Cline (`CLINE_API_KEY`, `CLINE_MODEL`, default
-///      `poolside/laguna-s-2.1:free`, base https://api.cline.bot/api/v1);
-///   2. OpenCode Zen (`OPENCODE_API_KEY`, `OPENCODE_BASE_URL`, `OPENCODE_MODEL`),
-///      free tier first to keep testing cheap;
-///   3. OpenCode Go (`OPENCODE_GO_API_KEY`, `OPENCODE_GO_MODEL`, default
-///      `kimi-k3`, base https://opencode.ai/zen/go/v1 — paid tier, no rate
-///      limits) — LAST of the opencode providers so billing only starts when
-///      the free ones fail;
-///   4. Gemini (`GEMINI_API_KEY`, `GEMINI_MODEL`, default `gemini-3.7-flash`,
-///      OpenAI-compatible endpoint);
-///   5. OpenRouter (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`) as automatic
-///      fallback when the primary fails;
-///   6. Groq / OpenAI if present (last resort fallback chain);
-///   7. [EchoLlm] when no key is configured (offline demo mode).
-/// `VOICE_FORGE_LLM_TIMEOUT_SECONDS` (default 45) raises the per-call timeout —
-/// needed for slow free-tier providers (e.g. OpenRouter `:free` models).
-VoicepipeLlm llmFromEnv(Map<String, String> env) {
-  final explicit = env['VOICE_FORGE_LLM_API_KEY'] != null;
-  if (explicit) {
-    final base = env['VOICE_FORGE_LLM_BASE_URL'] ?? '';
-    if (base.isEmpty) return EchoLlm();
-    return _openAiCompatible(
-      env,
-      base,
-      env['VOICE_FORGE_LLM_API_KEY'] ?? '',
-      env['VOICE_FORGE_LLM_MODEL'] ?? '',
-    );
-  }
-  final opencodeKey = env['OPENCODE_API_KEY'];
-  final openrouterKey = env['OPENROUTER_API_KEY'];
-  final groqKey = env['GROQ_API_KEY'];
-  final openaiKey = env['OPENAI_API_KEY'];
-
-  final candidates = <VoicepipeLlm>[];
-  final clineKey = env['CLINE_API_KEY'];
-  if (clineKey != null && clineKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://api.cline.bot/api/v1',
-        clineKey,
-        env['CLINE_MODEL'] ?? 'poolside/laguna-s-2.1:free',
-      ),
-    );
-  }
-  final opencodeGoKey = env['OPENCODE_GO_API_KEY'];
-  // Zen (free) before Go (paid): free tier is the default workhorse, paid
-  // billing only kicks in when the free one is down.
-  if (opencodeKey != null && opencodeKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        env['OPENCODE_BASE_URL'] ?? 'https://opencode.ai/zen/v1',
-        opencodeKey,
-        // laguna-s-2.1-free: no chain-of-thought (thinking) -> fastest TTFT
-        // (~1.5s vs ~3.6s for deepseek-v4-flash-free), tool calling works.
-        env['OPENCODE_MODEL'] ?? 'laguna-s-2.1-free',
-      ),
-    );
-  }
-  if (opencodeGoKey != null && opencodeGoKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://opencode.ai/zen/go/v1',
-        opencodeGoKey,
-        env['OPENCODE_GO_MODEL'] ?? 'kimi-k3',
-        // kimi-k3 on the Go endpoint only accepts temperature == 1.
-        temperature: 1.0,
-      ),
-    );
-  }
-  final geminiKey = env['GEMINI_API_KEY'];
-  if (geminiKey != null && geminiKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://generativelanguage.googleapis.com/v1beta/openai/',
-        geminiKey,
-        env['GEMINI_MODEL'] ?? 'gemini-3.7-flash',
-      ),
-    );
-  }
-  if (openrouterKey != null && openrouterKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://openrouter.ai/api/v1',
-        openrouterKey,
-        env['OPENROUTER_MODEL'] ?? 'openai/gpt-oss-20b:free',
-      ),
-    );
-  }
-  if (groqKey != null && groqKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://api.groq.com/openai/v1',
-        groqKey,
-        env['GROQ_MODEL'] ?? 'llama-3.3-70b-versatile',
-      ),
-    );
-  }
-  if (openaiKey != null && openaiKey.isNotEmpty) {
-    candidates.add(
-      _openAiCompatible(
-        env,
-        'https://api.openai.com/v1',
-        openaiKey,
-        env['OPENAI_MODEL'] ?? 'gpt-4o-mini',
-      ),
-    );
-  }
-  if (candidates.isEmpty) return EchoLlm();
-  var llm = candidates.first;
-  for (final fallback in candidates.skip(1)) {
+/// Chain [providers] with [FallbackLlm] (first is primary). Returns [EchoLlm]
+/// when the list is empty.
+VoicepipeLlm chainLlms(List<VoicepipeLlm> providers) {
+  if (providers.isEmpty) return EchoLlm();
+  var llm = providers.first;
+  for (final fallback in providers.skip(1)) {
     llm = FallbackLlm(primary: llm, fallback: fallback);
   }
   return llm;
+}
+
+/// Build a single OpenAI-compatible LLM from the explicit `VOICE_FORGE_LLM_*`
+/// env trio, or [EchoLlm] when unset. Provider-specific chains (Cline,
+/// OpenCode, Gemini, …) belong in the application — pass base URL, API key,
+/// model, and any provider headers via [OpenAiCompatibleLlm] directly.
+VoicepipeLlm llmFromEnv(Map<String, String> env) {
+  final base = env['VOICE_FORGE_LLM_BASE_URL'] ?? '';
+  final key = env['VOICE_FORGE_LLM_API_KEY'] ?? '';
+  if (base.isEmpty || key.isEmpty) return EchoLlm();
+  return _openAiCompatible(
+    env,
+    base,
+    key,
+    env['VOICE_FORGE_LLM_MODEL'] ?? '',
+  );
 }

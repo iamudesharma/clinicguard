@@ -30,8 +30,9 @@ fetch_whisper() { # prefix (tiny|base)
 }
 
 fetch_whisper tiny
-# Optional: better accuracy, ~2.5x memory (set VOICE_FORGE_WHISPER_MODEL=base)
-# fetch_whisper base
+# whisper-base: better accuracy for accented English (+67 MB).
+# Default for the agent; override with VOICE_FORGE_WHISPER_MODEL=tiny.
+fetch_whisper base
 
 # Piper en_US-lessac-medium (int8; ~19 MB)
 if [ ! -d vits-piper-en_US-lessac-medium-int8 ]; then
@@ -43,6 +44,15 @@ fi
 
 # Test audio (Obama.wav, 16 kHz mono, ~10 MB)
 fetch "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/Obama.wav"
+
+# Streaming STT: Zipformer transducer (en, int8; ~70 MB)
+STREAMING_DIR="sherpa-onnx-streaming-zipformer-en-2023-06-26"
+if [ ! -d "$STREAMING_DIR" ]; then
+  echo "downloading $STREAMING_DIR ..."
+  curl -SL "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${STREAMING_DIR}.tar.bz2" -o "${STREAMING_DIR}.tar.bz2"
+  tar xjf "${STREAMING_DIR}.tar.bz2"
+  rm -f "${STREAMING_DIR}.tar.bz2"
+fi
 
 echo
 echo "models ready in $(pwd):"

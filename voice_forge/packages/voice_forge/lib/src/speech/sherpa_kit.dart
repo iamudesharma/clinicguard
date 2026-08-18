@@ -84,12 +84,20 @@ class SherpaModels {
   final String whisperDir;
   final String whisperPrefix; // e.g. "tiny" or "base" (encoder/decoder files)
   final String piperDir;
+  final String? streamingDir; // e.g. 'models/streaming-zipformer-b-ctc-small'
+  final String whisperLanguage; // e.g. 'en', 'hi', '' (auto-detect)
+  final String whisperTask; // 'transcribe' or 'translate'
+  final String streamingModelType; // 'zipformer2' or 'nemo'
 
   const SherpaModels({
     required this.sileroVad,
     required this.whisperDir,
     this.whisperPrefix = 'tiny',
     required this.piperDir,
+    this.streamingDir,
+    this.whisperLanguage = '',
+    this.whisperTask = 'transcribe',
+    this.streamingModelType = 'zipformer2',
   });
 
   /// Standard layout under [modelsDir]: `silero_vad.onnx`,
@@ -97,12 +105,20 @@ class SherpaModels {
   factory SherpaModels.fromModelsDir(
     String modelsDir, {
     String whisperPrefix = 'tiny',
+    String? streamingDir,
+    String whisperLanguage = '',
+    String whisperTask = 'transcribe',
+    String streamingModelType = 'zipformer2',
   }) {
     return SherpaModels(
       sileroVad: '$modelsDir/silero_vad.onnx',
       whisperDir: '$modelsDir/sherpa-onnx-whisper-$whisperPrefix',
       whisperPrefix: whisperPrefix,
       piperDir: '$modelsDir/vits-piper-en_US-lessac-medium-int8',
+      streamingDir: streamingDir,
+      whisperLanguage: whisperLanguage,
+      whisperTask: whisperTask,
+      streamingModelType: streamingModelType,
     );
   }
 }
@@ -113,6 +129,7 @@ class SherpaKit {
   final List<sherpa.VoiceActivityDetector> _vads = [];
   sherpa.OfflineRecognizer? _recognizer;
   sherpa.OfflineTts? _tts;
+  sherpa.OnlineRecognizer? _onlineRecognizer;
   SpeechWorker? _worker;
   late SherpaModels _models;
 
@@ -149,7 +166,8 @@ class SherpaKit {
                 '${models.whisperDir}/${models.whisperPrefix}-encoder.int8.onnx',
             decoder:
                 '${models.whisperDir}/${models.whisperPrefix}-decoder.int8.onnx',
-            language: '', // auto-detect (en/hi)
+            language: models.whisperLanguage,
+            task: models.whisperTask,
           ),
           tokens: '${models.whisperDir}/${models.whisperPrefix}-tokens.txt',
           modelType: 'whisper',
@@ -173,6 +191,50 @@ class SherpaKit {
         ),
       ),
     );
+
+    // Streaming STT — optional, used for partial transcripts.
+    // Supports both Zipformer2 and Nemotron (NeMo transducer) architectures.
+    if (models.streamingDir != null) {
+      final dir = models.streamingDir!;
+      try {
+        // Determine model files based on architecture type.
+        String encoder, decoder, joiner;
+        if (models.streamingModelType == 'nemo') {
+          // Nemotron: files use simple names (encoder.int8.onnx, etc.)
+          encoder = '$dir/encoder.int8.onnx';
+          decoder = '$dir/decoder.int8.onnx';
+          joiner = '$dir/joiner.int8.onnx';
+        } else {
+          // Zipformer: files use chunk suffix
+          encoder = '$dir/encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx';
+          decoder = '$dir/decoder-epoch-99-avg-1-chunk-16-left-128.onnx';
+          joiner = '$dir/joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx';
+        }
+        kit._onlineRecognizer = sherpa.OnlineRecognizer(
+          sherpa.OnlineRecognizerConfig(
+            model: sherpa.OnlineModelConfig(
+              transducer: sherpa.OnlineTransducerModelConfig(
+                encoder: encoder,
+                decoder: decoder,
+                joiner: joiner,
+              ),
+              tokens: '$dir/tokens.txt',
+              modelType: models.streamingModelType,
+              numThreads: 2,
+              debug: false,
+            ),
+            enableEndpoint: true,
+            rule1MinTrailingSilence: 2.4,
+            rule2MinTrailingSilence: 1.2,
+            rule3MinUtteranceLength: 20,
+          ),
+        );
+      } catch (e) {
+        print('streaming STT init failed ($e); '
+            'falling back to batch Whisper');
+      }
+    }
+
     return kit;
   }
 
@@ -211,6 +273,11 @@ class SherpaKit {
   /// TTS implementation. Stateless per call: safe to share.
   VoicepipeTTS get tts => _SherpaTts(this);
 
+  /// Streaming STT implementation (partial transcripts). Returns null if
+  /// the streaming model was not loaded.
+  VoicepipeStreamingSTT? get streamingStt =>
+      _onlineRecognizer != null ? _SherpaStreamingStt(_onlineRecognizer!) : null;
+
   /// Convenience: all three implementations in one place.
   ({VoicepipeVAD Function() vadFactory, VoicepipeSTT stt, VoicepipeTTS tts})
   get speech => (vadFactory: createVad, stt: stt, tts: tts);
@@ -243,8 +310,10 @@ class SherpaKit {
     _vads.clear();
     _recognizer?.free();
     _tts?.free();
+    _onlineRecognizer?.free();
     _recognizer = null;
     _tts = null;
+    _onlineRecognizer = null;
   }
 }
 
@@ -287,6 +356,51 @@ class _SherpaStt implements VoicepipeSTT {
     final result = kit._recognizer!.getResult(stream);
     stream.free();
     return result.text.trim();
+  }
+}
+
+class _SherpaStreamingStt implements VoicepipeStreamingSTT {
+  final sherpa.OnlineRecognizer _recognizer;
+  late sherpa.OnlineStream _stream;
+
+  _SherpaStreamingStt(this._recognizer) {
+    _stream = _recognizer.createStream();
+  }
+
+  /// Set language hint for multilingual models (e.g. Nemotron 3.5).
+  /// [lang] — e.g. 'en-US', 'hi-IN', or 'auto' for auto-detection.
+  @override
+  void setLanguage(String lang) {
+    _stream.setOption(key: 'language', value: lang);
+  }
+
+  @override
+  String acceptFrame(Float32List frame) {
+    _stream.acceptWaveform(samples: frame, sampleRate: 16000);
+    while (_recognizer.isReady(_stream)) {
+      _recognizer.decode(_stream);
+    }
+    return _recognizer.getResult(_stream).text;
+  }
+
+  @override
+  String finalize() {
+    // Add tail padding to flush the recognizer
+    final tail = Float32List(8000); // 0.5s silence at 16kHz
+    _stream.acceptWaveform(samples: tail, sampleRate: 16000);
+    while (_recognizer.isReady(_stream)) {
+      _recognizer.decode(_stream);
+    }
+    final result = _recognizer.getResult(_stream).text.trim();
+    _stream.free();
+    _stream = _recognizer.createStream();
+    return result;
+  }
+
+  @override
+  void reset() {
+    _stream.free();
+    _stream = _recognizer.createStream();
   }
 }
 

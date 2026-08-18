@@ -24,6 +24,8 @@ class PeerSession {
   final AudioCore core;
 
   late final RTCPeerConnection _pc;
+  StreamSubscription<Map<String, dynamic>>? _eventsSub;
+  Timer? _statsTimer;
 
   // Audio state (negotiated from the offer's Opus m-line).
   int _sampleRate = 48000;
@@ -75,7 +77,7 @@ class PeerSession {
   }
 
   PeerSession(this._ws, this._id, this.core) {
-    core.events.listen(_publishEvent);
+    _eventsSub = core.events.listen(_publishEvent);
     _outSub = core.outgoingPcm.listen(_onOutgoingFrame);
   }
 
@@ -123,7 +125,7 @@ class PeerSession {
       print('[peer$_id] connection state: $state');
       if (_connected) {
         _send({'type': 'connected', ...?core.connectionInfo});
-        Timer.periodic(const Duration(seconds: 5), _logStats);
+        _statsTimer ??= Timer.periodic(const Duration(seconds: 5), _logStats);
       }
       if (state == PeerConnectionState.failed ||
           state == PeerConnectionState.closed) {
@@ -362,10 +364,17 @@ class PeerSession {
     _closed = true;
     print('[peer$_id] closing peer session');
     _outSub?.cancel();
+    _eventsSub?.cancel();
+    _statsTimer?.cancel();
     try {
       core.onPeerClosed();
     } catch (e) {
       print('[peer$_id] onPeerClosed failed: $e');
+    }
+    try {
+      core.dispose();
+    } catch (e) {
+      print('[peer$_id] core.dispose failed: $e');
     }
     _pc.close();
   }
