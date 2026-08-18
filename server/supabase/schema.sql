@@ -30,7 +30,9 @@ create table if not exists public.sessions (
   language text,
   status text not null default 'active',
   created_at timestamptz not null default now(),
-  ended_at timestamptz
+  ended_at timestamptz,
+  assigned_to uuid references public.profiles(id) on delete set null,
+  queue_status text not null default 'waiting' check (queue_status in ('waiting', 'in_progress', 'completed'))
 );
 
 create table if not exists public.transcripts (
@@ -81,6 +83,41 @@ create policy "bookings_access" on public.bookings
     public.is_clinician()
     or patient_id in (select id from public.patients where owner_id = auth.uid())
   );
+
+-- ---- Follow-up check-ins ----
+create table if not exists public.follow_ups (
+  id bigint generated always as identity primary key,
+  patient_id text not null references public.patients(id) on delete cascade,
+  session_room_id text references public.sessions(room_id) on delete set null,
+  urgency_level text not null check (urgency_level in ('medium', 'high')),
+  reason text,
+  summary_snapshot jsonb not null default '{}',
+  scheduled_for timestamptz not null,
+  status text not null default 'pending' check (status in ('pending', 'completed', 'dismissed')),
+  created_at timestamptz not null default now()
+);
+
+alter table public.follow_ups enable row level security;
+
+drop policy if exists "follow_ups_access" on public.follow_ups;
+create policy "follow_ups_access" on public.follow_ups
+  for all using (
+    public.is_clinician()
+    or patient_id in (select id from public.patients where owner_id = auth.uid())
+  );
+
+-- DEMO ONLY: expose follow_ups to realtime
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'follow_ups'
+  ) then
+    alter publication supabase_realtime add table public.follow_ups;
+  end if;
+end $$;
 
 -- ---- RAG knowledge base (pgvector) ----
 -- embedding is an *unconstrained* vector so the embedding model's dimensions
@@ -213,6 +250,11 @@ create policy "sessions_access" on public.sessions
     public.is_clinician()
     or patient_id in (select id from public.patients where owner_id = auth.uid())
   );
+-- clinicians can claim/unclaim sessions (update assigned_to and queue_status)
+drop policy if exists "sessions_clinician_claim" on public.sessions;
+create policy "sessions_clinician_claim" on public.sessions
+  for update using (public.is_clinician())
+  with check (public.is_clinician());
 drop policy if exists "transcripts_access" on public.transcripts;
 create policy "transcripts_access" on public.transcripts
   for select using (

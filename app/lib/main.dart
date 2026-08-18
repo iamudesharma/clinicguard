@@ -4,9 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import 'config.dart';
 import 'screens/auth_screen.dart';
+import 'screens/bookings_screen.dart';
+import 'screens/emergency_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
-import 'services/platform_stt.dart';
+import 'screens/queue_screen.dart';
 import 'state/auth_state.dart';
 import 'state/call_state.dart';
 import 'theme/app_theme.dart';
@@ -82,14 +84,36 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  Map<String, dynamic>? _lastEmergency;
 
   @override
   Widget build(BuildContext context) {
+    final callState = context.watch<CallState>();
+    // Navigate to EmergencyScreen when emergency_alert fires.
+    final emergency = callState.emergencyAlert;
+    if (emergency != null && emergency != _lastEmergency) {
+      _lastEmergency = emergency;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => EmergencyScreen(emergencyData: emergency),
+            ),
+          );
+        }
+      });
+    }
+
     return Scaffold(
       body: AuroraBackground(
         child: IndexedStack(
           index: _index,
-          children: const [HomeScreen(), HistoryScreen()],
+          children: const [
+            HomeScreen(),
+            HistoryScreen(),
+            QueueScreen(),
+            BookingsScreen(),
+          ],
         ),
       ),
       bottomNavigationBar: GlowNavBar(
@@ -105,6 +129,16 @@ class _MainShellState extends State<MainShell> {
             icon: Icons.history_outlined,
             selectedIcon: Icons.history,
             label: 'History',
+          ),
+          GlowNavDestination(
+            icon: Icons.dashboard_outlined,
+            selectedIcon: Icons.dashboard,
+            label: 'Queue',
+          ),
+          GlowNavDestination(
+            icon: Icons.calendar_month_outlined,
+            selectedIcon: Icons.calendar_month,
+            label: 'Bookings',
           ),
         ],
       ),

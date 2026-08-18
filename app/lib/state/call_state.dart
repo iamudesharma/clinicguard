@@ -97,6 +97,15 @@ class CallState extends ChangeNotifier {
   String bookingError = '';
   bool bookingInProgress = false;
 
+  // Triage update (structured data during call).
+  Map<String, dynamic>? triageUpdate;
+
+  // Emergency alert (agent detected emergency).
+  Map<String, dynamic>? emergencyAlert;
+
+  // Follow-up scheduled (auto-scheduled at call end).
+  Map<String, dynamic>? followUpScheduled;
+
   // Platform STT settings.
   bool get usePlatformStt => _usePlatformStt;
   String get sttLocaleId => _sttLocaleId;
@@ -223,6 +232,9 @@ class CallState extends ChangeNotifier {
     booking = null;
     bookingError = '';
     bookingInProgress = false;
+    triageUpdate = null;
+    emergencyAlert = null;
+    followUpScheduled = null;
     micEnabled = false;
     _bargeInArmed = false;
     _activePatientId = null;
@@ -330,6 +342,27 @@ class CallState extends ChangeNotifier {
     if (_call?.dataChannelOpen != true) return; // channel not up yet — retried
     _pendingPatientId = null;
     await _call?.send({'event': 'patient_id', 'patient_id': id});
+  }
+
+  /// Sends previous summary context to the agent for a follow-up call.
+  Future<void> sendPreviousSummary(Map<String, dynamic> summary) async {
+    final call = _call;
+    if (call == null || !call.dataChannelOpen) return;
+    await call.send({'event': 'previous_summary', 'summary': summary});
+  }
+
+  /// Signals the agent that this is a follow-up session.
+  Future<void> sendStartFollowUp({
+    required int followUpId,
+    required String previousRoomId,
+  }) async {
+    final call = _call;
+    if (call == null || !call.dataChannelOpen) return;
+    await call.send({
+      'event': 'start_follow_up',
+      'follow_up_id': followUpId,
+      'previous_room_id': previousRoomId,
+    });
   }
 
   /// The user started talking while the agent was speaking: tell the agent
@@ -527,6 +560,18 @@ class CallState extends ChangeNotifier {
       case 'booking_confirmed':
         booking = payload['booking'] as Map<String, dynamic>?;
         bookingError = '';
+        break;
+      case 'triage_update':
+        triageUpdate = payload;
+        break;
+      case 'emergency_alert':
+        emergencyAlert = payload;
+        break;
+      case 'booking_updated':
+        booking = payload['booking'] as Map<String, dynamic>?;
+        break;
+      case 'follow_up_scheduled':
+        followUpScheduled = payload;
         break;
     }
     notifyListeners();

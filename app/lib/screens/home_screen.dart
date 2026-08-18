@@ -112,13 +112,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () => _showPatientPicker(context),
                       ),
                     ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 
@@ -1121,12 +1122,64 @@ class _SttSettingsRowState extends State<_SttSettingsRow> {
                           onChanged: (v) {
                             if (v != null) callState.setSttLocale(v);
                           },
-                        ),
+                         ),
                 ),
               ],
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Shows a follow-up reminder banner when a pending follow-up exists.
+class _FollowUpBanner extends StatefulWidget {
+  const _FollowUpBanner();
+
+  @override
+  State<_FollowUpBanner> createState() => _FollowUpBannerState();
+}
+
+class _FollowUpBannerState extends State<_FollowUpBanner> {
+  List<dynamic> _followUps = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFollowUps();
+  }
+
+  Future<void> _loadFollowUps() async {
+    try {
+      final followUps = await ApiClient().fetchFollowUps(status: 'pending');
+      if (mounted) setState(() { _followUps = followUps; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading || _followUps.isEmpty) return const SizedBox.shrink();
+    final followUp = _followUps.first;
+    final reason = followUp['reason'] ?? '';
+    return GlassCard(
+      margin: const EdgeInsets.only(bottom: 8),
+      glow: AppColors.amberGlow,
+      glowOpacity: 0.2,
+      child: ListTile(
+        leading: const Icon(Icons.follow_the_signs, color: AppColors.amberGlow),
+        title: const Text('Follow-up check-in', style: TextStyle(fontSize: 14)),
+        subtitle: Text(
+          reason.isNotEmpty ? 'Regarding: $reason' : 'How are you feeling today?',
+          style: const TextStyle(fontSize: 12),
+        ),
+        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+        onTap: () {
+          // TODO: start follow-up call with previous context
+        },
       ),
     );
   }

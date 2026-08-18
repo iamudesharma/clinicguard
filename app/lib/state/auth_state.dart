@@ -20,6 +20,14 @@ class AuthState extends ChangeNotifier {
 
   bool get isSupabaseConfigured => AppConfig.supabaseUrl.isNotEmpty;
 
+  /// Returns true if the current user has the 'clinician' role in app_metadata.
+  bool get isClinician {
+    final u = user;
+    if (u == null) return false;
+    final role = u.appMetadata['role'];
+    return role == 'clinician';
+  }
+
   AuthState() {
     // tests construct AuthState without Supabase
     try {
