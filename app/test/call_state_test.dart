@@ -50,19 +50,19 @@ void main() {
     ));
     state.agentState = 'speaking';
 
-    // In a unit test the WebRTC controller cannot start; startCall reports
-    // phase=error asynchronously (the transport failure). The reset must have
-    // happened before that.
-    // Swallow the async transport error so it can't fail the test zone.
-    unawaited(state.startCall(patientId: 'PAT-ABC123').catchError((_) {}));
-    for (var i = 0; i < 50 && state.phase != CallPhase.error; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
-    expect(state.phase, CallPhase.error);
+    // _resetSessionState() runs synchronously at the top of startCall, before
+    // any WebRTC/signaling await. Don't gate this on transport failure — CI
+    // runners may keep the call in connecting for seconds.
+    final callFuture = state.startCall(patientId: 'PAT-ABC123');
 
     expect(state.transcript, isEmpty);
     expect(state.agentState, 'idle');
     expect(state.summary, isNull);
     expect(state.roomId, isEmpty);
+    expect(state.phase, CallPhase.connecting);
+
+    // Tear down the in-flight call so timers/subscriptions don't leak.
+    unawaited(callFuture.catchError((_) {}));
+    await state.endCall();
   });
 }
