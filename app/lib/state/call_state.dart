@@ -10,6 +10,11 @@ import '../services/platform_stt.dart';
 import '../vad/barge_in_detector.dart';
 import '../vad/mic_tap.dart';
 
+/// Injectable for tests — avoids real WebRTC/WebSocket in unit tests.
+typedef VoiceCallControllerFactory = VoiceCallController Function(
+  String signalingUrl,
+);
+
 enum CallPhase { idle, connecting, connected, error }
 
 class TranscriptLine {
@@ -34,6 +39,7 @@ class TranscriptLine {
 /// `barge_in` the moment the user starts talking over the agent.
 class CallState extends ChangeNotifier {
   final ApiClient _api = ApiClient();
+  final VoiceCallControllerFactory _voiceCallFactory;
 
   bool _disposed = false;
 
@@ -61,7 +67,9 @@ class CallState extends ChangeNotifier {
   /// orb's speaking animation without rebuilding the tree at audio rate.
   final ValueNotifier<double> micLevel = ValueNotifier<double>(0);
 
-  CallState() {
+  CallState({VoiceCallControllerFactory? voiceCallFactory})
+      : _voiceCallFactory = voiceCallFactory ??
+            ((url) => VoiceCallController(signalingUrl: url)) {
     _bargeInDetector = BargeInDetector(
       rmsThreshold: AppConfig.bargeInRmsThreshold,
       voicedFramesToStart: 4, // ~80ms — reduces false triggers from noise
@@ -124,7 +132,7 @@ class CallState extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final call = VoiceCallController(signalingUrl: AppConfig.signalingUrl);
+      final call = _voiceCallFactory(AppConfig.signalingUrl);
       _call = call;
 
       _phaseSub = call.phase.listen((p) {
@@ -260,29 +268,33 @@ class CallState extends ChangeNotifier {
   /// call's summary — and leak into the booking form.
   void _subscribeEhrRealtime() {
     if (AppConfig.supabaseUrl.isEmpty) return;
-    final activePatientId = _activePatientId;
-    final client = Supabase.instance.client;
-    final channel = client
-        .channel('ehr-live')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'ehr_summaries',
-          callback: (payload) {
-            final row = payload.newRecord;
-            if (activePatientId != null &&
-                row['patient_id']?.toString() != activePatientId) {
-              return; // another patient's summary: ignore
-            }
-            final summary = row['summary'];
-            if (summary is Map<String, dynamic>) {
-              _summary = summary;
-              notifyListeners();
-            }
-          },
-        );
-    _ehrChannel = channel;
-    channel.subscribe();
+    try {
+      final activePatientId = _activePatientId;
+      final client = Supabase.instance.client;
+      final channel = client
+          .channel('ehr-live')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'ehr_summaries',
+            callback: (payload) {
+              final row = payload.newRecord;
+              if (activePatientId != null &&
+                  row['patient_id']?.toString() != activePatientId) {
+                return; // another patient's summary: ignore
+              }
+              final summary = row['summary'];
+              if (summary is Map<String, dynamic>) {
+                _summary = summary;
+                notifyListeners();
+              }
+            },
+          );
+      _ehrChannel = channel;
+      channel.subscribe();
+    } catch (e) {
+      debugPrint('[CallState] EHR realtime skipped: $e');
+    }
   }
 
   /// Books the given slot (label from GET /slots) for this session.

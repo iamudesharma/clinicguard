@@ -1,8 +1,18 @@
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:voice_forge_flutter/voice_forge_flutter.dart';
 
 import 'package:clinic_guard/state/call_state.dart';
+
+/// No WebRTC/WebSocket — unit tests must not touch the network (CI has no agent).
+class _FakeVoiceCallController extends VoiceCallController {
+  _FakeVoiceCallController() : super(signalingUrl: 'ws://test-fake');
+
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<void> end() async {}
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -39,10 +49,11 @@ void main() {
   });
 
   test('startCall resets stale state before connecting', () async {
-    final state = CallState();
+    final state = CallState(
+      voiceCallFactory: (_) => _FakeVoiceCallController(),
+    );
 
-    // Stale state from a previous call (startCall with _call == null should
-    // wipe it before entering connecting).
+    // Stale state from a previous call.
     state.transcript.add(const TranscriptLine(
       role: 'assistant',
       text: 'old reply',
@@ -50,19 +61,15 @@ void main() {
     ));
     state.agentState = 'speaking';
 
-    // _resetSessionState() runs synchronously at the top of startCall, before
-    // any WebRTC/signaling await. Don't gate this on transport failure — CI
-    // runners may keep the call in connecting for seconds.
-    final callFuture = state.startCall(patientId: 'PAT-ABC123');
+    await state.startCall(patientId: 'PAT-ABC123');
 
     expect(state.transcript, isEmpty);
     expect(state.agentState, 'idle');
     expect(state.summary, isNull);
     expect(state.roomId, isEmpty);
-    expect(state.phase, CallPhase.connecting);
+    expect(state.phase, CallPhase.connected);
 
-    // Tear down the in-flight call so timers/subscriptions don't leak.
-    unawaited(callFuture.catchError((_) {}));
     await state.endCall();
+    expect(state.phase, CallPhase.idle);
   });
 }
