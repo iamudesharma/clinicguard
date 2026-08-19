@@ -13,7 +13,10 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version-file: .flutter-version
           cache: true
+          # Bust runners that cached Flutter stable with Dart <3.13 (SDK ^3.13.0).
+          cache-key: dart-3.13
 
       - name: Bootstrap workspace
         working-directory: voice_forge
@@ -38,13 +41,17 @@ jobs:
   # the native library and models (~170 MB, cached between runs).
   runtime:
     runs-on: ubuntu-latest
+    env:
+      VOICE_FORGE_NATIVE_DIR: ${{ github.workspace }}/voice_forge/third_party/native
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version-file: .flutter-version
           cache: true
+          cache-key: dart-3.13
 
       - name: Install libopus
         run: sudo apt-get update && sudo apt-get install -y libopus0
@@ -53,9 +60,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/voice_forge/native
+            voice_forge/third_party/native
             voice_forge/models
-          key: sherpa-${{ runner.os }}-v1.13.5
+          key: sherpa-${{ runner.os }}-v1.13.5-${{ hashFiles('.flutter-version') }}
 
       - name: Resolve workspace
         working-directory: voice_forge
@@ -81,7 +88,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version-file: .flutter-version
           cache: true
+          cache-key: dart-3.13
 
       - name: Analyze + test app
         working-directory: app
@@ -93,6 +102,10 @@ jobs:
   # Python control plane — import check + API smoke test.
   server:
     runs-on: ubuntu-latest
+    env:
+      # curated-tokenizers (via misaki) fails to build with clang on some runners.
+      CC: gcc
+      CXX: g++
     steps:
       - uses: actions/checkout@v4
 
