@@ -29,3 +29,8 @@ app/android/.gradle/
 
 # Internal dev tooling — never pushed (how-we-work, not what-we-ship)
 .opencode/agent/sherpa-sync-*.md
+.commandcode/
+.opencode/plans/
+.opencode/commands/
+
+.specify/

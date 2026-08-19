@@ -73,6 +73,20 @@ breathing after allergen exposure · high fever in an infant under 3 months ·
 persistent vomiting or severe dehydration · confusion or altered consciousness.
 
 ## Tools (call them when appropriate)
+- register_patient: Call after extracting the patient's name and age.
+- record_vitals: Call whenever the patient mentions any vital sign.
+- add_symptom: Call for each symptom the patient reports.
+- assign_urgency: Call when you have enough information to determine urgency.
+  Do NOT wait until the end — assign urgency as soon as the picture is clear.
+
+## Emergency handling (CRITICAL)
+When you assign urgency_level = "emergency":
+1. STOP all triage questions immediately.
+2. Say: "I believe this may be a medical emergency. Should I show you emergency numbers and the nearest hospital?"
+3. Wait for the patient to confirm (say "yes" or similar).
+4. On confirmation, the system will automatically show emergency information.
+5. Do NOT proceed with further questions after emergency is assigned.
+
 - If the patient asks to book an appointment, call get_available_slots, read
   the slot labels aloud, ask the patient which one they want, then call
   book_appointment with the chosen label, the patient's name and the reason
@@ -117,6 +131,13 @@ class TriageCore implements AudioCore {
   String? _patientId;
   Map<String, dynamic>? _patient;
   bool _bookedDuringCall = false;
+
+  // Structured triage data accumulated during the call.
+  List<Map<String, dynamic>> _triageSymptoms = [];
+  Map<String, dynamic> _triageVitals = {};
+  String _triageUrgency = '';
+  String _triageUrgencyReason = '';
+  String _chiefComplaint = '';
 
   /// Completes when the patient-id load attempt finishes (success or failure).
   /// Lets the greeting await the real lookup instead of polling a deadline.
@@ -252,6 +273,131 @@ class TriageCore implements AudioCore {
         'additionalProperties': false,
       },
     ),
+    ToolDef(
+      name: 'register_patient',
+      description:
+          'Register the patient at triage start. Call after extracting name, '
+          'age, and other details. patient_id is filled automatically.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'name': {'type': 'string', 'description': 'Patient full name.'},
+          'age': {'type': 'string', 'description': 'Patient age.'},
+          'sex': {'type': 'string', 'description': 'Patient sex.'},
+          'known_conditions': {
+            'type': 'string',
+            'description': 'Known medical conditions.',
+          },
+          'allergies': {'type': 'string', 'description': 'Known allergies.'},
+        },
+        'required': ['name', 'age'],
+        'additionalProperties': false,
+      },
+    ),
+    ToolDef(
+      name: 'record_vitals',
+      description:
+          'Record patient-reported vital signs. Call when the patient '
+          'mentions blood pressure, heart rate, temperature, SpO2, or '
+          'respiratory rate.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'blood_pressure': {'type': 'string', 'description': 'e.g. 150/95'},
+          'heart_rate': {'type': 'string', 'description': 'e.g. 110'},
+          'temperature': {'type': 'string', 'description': 'e.g. 38.5'},
+          'spo2': {'type': 'string', 'description': 'e.g. 96'},
+          'respiratory_rate': {'type': 'string', 'description': 'e.g. 20'},
+        },
+        'additionalProperties': false,
+      },
+    ),
+    ToolDef(
+      name: 'add_symptom',
+      description:
+          'Add a symptom to the triage record. Call for each symptom '
+          'the patient reports.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'symptom': {
+            'type': 'string',
+            'description': 'Symptom name (e.g. chest pain).',
+          },
+          'onset': {
+            'type': 'string',
+            'description': 'When it started (e.g. 2 hours ago).',
+          },
+          'severity': {
+            'type': 'string',
+            'description': 'Severity (mild/moderate/severe).',
+          },
+        },
+        'required': ['symptom'],
+        'additionalProperties': false,
+      },
+    ),
+    ToolDef(
+      name: 'assign_urgency',
+      description:
+          'Assign urgency level based on clinical picture. Call when you '
+          'have enough information. Do NOT wait until the end of the '
+          'conversation.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'urgency_level': {
+            'type': 'string',
+            'description': 'low, medium, high, or emergency',
+          },
+          'reason': {
+            'type': 'string',
+            'description': 'Clinical reasoning for the urgency level.',
+          },
+        },
+        'required': ['urgency_level', 'reason'],
+        'additionalProperties': false,
+      },
+    ),
+    ToolDef(
+      name: 'cancel_appointment',
+      description:
+          'Cancel an existing appointment. Call when the patient asks to '
+          'cancel their booking.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'booking_id': {
+            'type': 'string',
+            'description': 'The booking ID to cancel (e.g. BK-abc123).',
+          },
+        },
+        'required': ['booking_id'],
+        'additionalProperties': false,
+      },
+    ),
+    ToolDef(
+      name: 'reschedule_appointment',
+      description:
+          'Reschedule an existing appointment to a new slot. Call get_available_slots '
+          'first to get available slots, then call this with the chosen slot.',
+      parameters: {
+        'type': 'object',
+        'properties': {
+          'booking_id': {
+            'type': 'string',
+            'description': 'The booking ID to reschedule.',
+          },
+          'new_slot': {
+            'type': 'string',
+            'description':
+                'The new slot label from get_available_slots, e.g. "Tomorrow 11:00".',
+          },
+        },
+        'required': ['booking_id', 'new_slot'],
+        'additionalProperties': false,
+      },
+    ),
   ];
 
   Future<String> _runTool(LlmToolCall call) async {
@@ -264,6 +410,18 @@ class TriageCore implements AudioCore {
         result = await _bookAppointment(call.arguments);
       case 'search_knowledge':
         result = await _searchKnowledge(call.arguments);
+      case 'register_patient':
+        result = await _registerPatient(call.arguments);
+      case 'record_vitals':
+        result = await _recordVitals(call.arguments);
+      case 'add_symptom':
+        result = await _addSymptom(call.arguments);
+      case 'assign_urgency':
+        result = await _assignUrgency(call.arguments);
+      case 'cancel_appointment':
+        result = await _cancelAppointment(call.arguments);
+      case 'reschedule_appointment':
+        result = await _rescheduleAppointment(call.arguments);
       default:
         result = jsonEncode({'error': 'unknown tool: ${call.name}'});
     }
@@ -367,6 +525,227 @@ class TriageCore implements AudioCore {
       safeLog('[$roomId] knowledge search failed: $e');
     }
     return jsonEncode({'results': []});
+  }
+
+  /// Publishes triage_update event with current structured data.
+  void _publishTriageUpdate() {
+    if (_patientId == null) return;
+    _events.add({
+      'type': 'triage_update',
+      'patient_id': _patientId,
+      'symptoms': _triageSymptoms,
+      'vitals': _triageVitals,
+      'urgency_level': _triageUrgency,
+      'urgency_reason': _triageUrgencyReason,
+      'chief_complaint': _chiefComplaint,
+    });
+  }
+
+  Future<String> _registerPatient(Map<String, dynamic> args) async {
+    final name = (args['name'] as String? ?? '').trim();
+    if (name.isEmpty) return jsonEncode({'error': 'name is required'});
+    try {
+      final res = await _http
+          .post(
+            Uri.parse('$apiBase/triage/$_patientId/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'name': name,
+              'age': args['age'] ?? '',
+              'sex': args['sex'] ?? '',
+              'known_conditions': args['known_conditions'] ?? '',
+              'allergies': args['allergies'] ?? '',
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonEncode({'status': 'registered', 'patient_id': _patientId});
+      }
+      return jsonEncode({'error': 'registration failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'registration request failed: $e'});
+    }
+  }
+
+  Future<String> _recordVitals(Map<String, dynamic> args) async {
+    final vitals = <String, dynamic>{};
+    for (final key in [
+      'blood_pressure',
+      'heart_rate',
+      'temperature',
+      'spo2',
+      'respiratory_rate',
+    ]) {
+      final v = args[key] as String?;
+      if (v != null && v.isNotEmpty) vitals[key] = v;
+    }
+    if (vitals.isEmpty) return jsonEncode({'error': 'no vitals provided'});
+    try {
+      final res = await _http
+          .post(
+            Uri.parse('$apiBase/triage/$_patientId/vitals'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(vitals),
+          )
+          .timeout(const Duration(seconds: 8));
+      _triageVitals = {..._triageVitals, ...vitals};
+      _publishTriageUpdate();
+      if (res.statusCode == 200) {
+        return jsonEncode({'status': 'recorded', 'vitals': _triageVitals});
+      }
+      return jsonEncode({'error': 'vitals recording failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'vitals request failed: $e'});
+    }
+  }
+
+  Future<String> _addSymptom(Map<String, dynamic> args) async {
+    final symptom = (args['symptom'] as String? ?? '').trim();
+    if (symptom.isEmpty) return jsonEncode({'error': 'symptom is required'});
+    final entry = {
+      'symptom': symptom,
+      'onset': args['onset'] ?? '',
+      'severity': args['severity'] ?? '',
+    };
+    try {
+      final res = await _http
+          .post(
+            Uri.parse('$apiBase/triage/$_patientId/symptoms'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(entry),
+          )
+          .timeout(const Duration(seconds: 8));
+      _triageSymptoms.add(entry);
+      _publishTriageUpdate();
+      if (res.statusCode == 200) {
+        return jsonEncode({'status': 'recorded', 'symptoms': _triageSymptoms});
+      }
+      return jsonEncode({'error': 'symptom recording failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'symptom request failed: $e'});
+    }
+  }
+
+  Future<String> _assignUrgency(Map<String, dynamic> args) async {
+    final level = (args['urgency_level'] as String? ?? '').trim();
+    final reason = (args['reason'] as String? ?? '').trim();
+    if (level.isEmpty || reason.isEmpty) {
+      return jsonEncode({'error': 'urgency_level and reason are required'});
+    }
+    try {
+      final res = await _http
+          .post(
+            Uri.parse('$apiBase/triage/$_patientId/urgency'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'urgency_level': level,
+              'reason': reason,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      _triageUrgency = level;
+      _triageUrgencyReason = reason;
+      _publishTriageUpdate();
+      if (res.statusCode == 200) {
+        if (level == 'emergency') {
+          // Fetch nearby hospital and emit emergency_alert event.
+          final hospital = await _fetchNearestHospital();
+          _events.add({
+            'type': 'emergency_alert',
+            'urgency_level': 'emergency',
+            'reason': reason,
+            'nearest_hospital': hospital,
+          });
+          safeLog('[$roomId] EMERGENCY alert emitted');
+        }
+        return jsonEncode({
+          'status': 'assigned',
+          'urgency_level': level,
+          'reason': reason,
+        });
+      }
+      return jsonEncode({'error': 'urgency assignment failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'urgency request failed: $e'});
+    }
+  }
+
+  Future<Map<String, dynamic>> _fetchNearestHospital() async {
+    try {
+      final res = await _http
+          .get(Uri.parse('$apiBase/hospitals/nearby'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final hospitals = data['hospitals'] as List?;
+        if (hospitals != null && hospitals.isNotEmpty) {
+          return hospitals.first as Map<String, dynamic>;
+        }
+      }
+    } catch (e) {
+      safeLog('[$roomId] hospital fetch failed: $e');
+    }
+    return {
+      'name': 'Emergency Services',
+      'address': 'Call immediately',
+      'phone': '911',
+      'maps_url': 'https://www.google.com/maps/search/?api=1&query=nearest+hospital',
+    };
+  }
+
+  Future<String> _cancelAppointment(Map<String, dynamic> args) async {
+    final bookingId = (args['booking_id'] as String? ?? '').trim();
+    if (bookingId.isEmpty) return jsonEncode({'error': 'booking_id is required'});
+    try {
+      final res = await _http
+          .delete(Uri.parse('$apiBase/bookings/$bookingId'))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        _events.add({
+          'type': 'booking_updated',
+          'booking': data,
+          'action': 'cancelled',
+        });
+        return jsonEncode({'status': 'cancelled', 'booking_id': bookingId});
+      }
+      return jsonEncode({'error': 'cancellation failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'cancellation request failed: $e'});
+    }
+  }
+
+  Future<String> _rescheduleAppointment(Map<String, dynamic> args) async {
+    final bookingId = (args['booking_id'] as String? ?? '').trim();
+    final newSlot = (args['new_slot'] as String? ?? '').trim();
+    if (bookingId.isEmpty || newSlot.isEmpty) {
+      return jsonEncode({'error': 'booking_id and new_slot are required'});
+    }
+    try {
+      final res = await _http
+          .put(
+            Uri.parse('$apiBase/bookings/$bookingId'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'slot': newSlot}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        _events.add({
+          'type': 'booking_updated',
+          'booking': data['booking'] ?? data,
+          'action': 'rescheduled',
+        });
+        return jsonEncode({
+          'status': 'rescheduled',
+          'booking_id': bookingId,
+          'new_slot': newSlot,
+        });
+      }
+      return jsonEncode({'error': 'reschedule failed: ${res.statusCode}'});
+    } catch (e) {
+      return jsonEncode({'error': 'reschedule request failed: $e'});
+    }
   }
 
   /// Auto-retrieval before each LLM turn: ground the reply with the top-k
@@ -675,12 +1054,54 @@ class TriageCore implements AudioCore {
               .then((_) {})
               .catchError((_) {}),
         );
+        // Auto-schedule follow-up for medium/high urgency.
+        final urgency = (_triageUrgency.isNotEmpty
+                ? _triageUrgency
+                : summary['urgency_level'] ?? '')
+            .toString();
+        if (urgency == 'medium' || urgency == 'high') {
+          _scheduleFollowUp(summary, urgency);
+        }
       }
     } else {
       safeLog('[$roomId] summary generation failed');
     }
     await _maybeBookAppointment(summary);
     safeLog('[$roomId] intent cache stats: ${session.cacheStats}');
+  }
+
+  void _scheduleFollowUp(Map<String, dynamic> summary, String urgency) {
+    final scheduledFor = DateTime.now().add(const Duration(hours: 24));
+    unawaited(
+      _http
+          .post(
+            Uri.parse('$apiBase/follow-ups'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'patient_id': _patientId,
+              'session_room_id': roomId,
+              'urgency_level': urgency,
+              'reason': summary['chief_complaint'] ?? '',
+              'summary_snapshot': summary,
+              'scheduled_for': scheduledFor.toUtc().toIso8601String(),
+            }),
+          )
+          .then((res) {
+        if (res.statusCode == 201 || res.statusCode == 200) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          _events.add({
+            'type': 'follow_up_scheduled',
+            'follow_up_id': data['follow_up_id'],
+            'scheduled_for': scheduledFor.toUtc().toIso8601String(),
+            'urgency_level': urgency,
+            'reason': summary['chief_complaint'] ?? '',
+          });
+          safeLog('[$roomId] follow-up scheduled for $scheduledFor');
+        }
+      }).catchError((e) {
+        safeLog('[$roomId] follow-up scheduling failed: $e');
+      }),
+    );
   }
 
   Future<void> _maybeBookAppointment(Map<String, dynamic>? summary) async {

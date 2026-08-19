@@ -208,6 +208,306 @@ class Store:
             return res.execute().data
         return list(self._memory.get("patients", []))
 
+    # ---- Queue (clinician dashboard) ----
+
+    async def list_queue_sessions(
+        self, status: str = "", limit: int = 50
+    ) -> list[dict[str, Any]]:
+        """Sessions for the clinician queue, ordered by urgency."""
+        t = self._table("sessions")
+        if t is not None:
+            q = t.select("*, patients(name)")
+            if status:
+                q = q.eq("queue_status", status)
+            res = await asyncio.to_thread(q.order, "created_at", desc=True)
+            rows = res.execute().data
+        else:
+            rows = list(self._sessions.values())
+            if status:
+                rows = [r for r in rows if r.get("queue_status") == status]
+
+        # Batch-fetch triage_results for urgency
+        patient_ids = list({r.get("patient_id") or "" for r in rows if r.get("patient_id")})
+        triage_map: dict[str, dict[str, Any]] = {}
+        if patient_ids and t is not None:
+            for i in range(0, len(patient_ids), 100):
+                chunk = patient_ids[i : i + 100]
+                try:
+                    res = await asyncio.to_thread(
+                        self._table("triage_results").select("*").in_, "patient_id", chunk
+                    )
+                    for tr in res.execute().data:
+                        pid = tr.get("patient_id", "")
+                        # Keep latest triage per patient
+                        if pid not in triage_map or (tr.get("created_at") or 0) > (
+                            triage_map[pid].get("created_at") or 0
+                        ):
+                            triage_map[pid] = tr
+                except Exception:
+                    pass
+        elif patient_ids:
+            for tr in self._memory.get("triage_results", []):
+                pid = tr.get("patient_id", "")
+                if pid in patient_ids:
+                    triage_map[pid] = tr
+
+        urgency_order = {"emergency": 0, "high": 1, "medium": 2, "low": 3}
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            pid = r.get("patient_id") or ""
+            tr = triage_map.get(pid, {})
+            patient_name = ""
+            if t is not None:
+                try:
+                    pres = await asyncio.to_thread(
+                        self._table("patients").select("name").eq, "id", pid
+                    )
+                    pdata = pres.execute().data
+                    if pdata:
+                        patient_name = pdata[0].get("name", "")
+                except Exception:
+                    pass
+            else:
+                for p in self._memory.get("patients", []):
+                    if p.get("id") == pid:
+                        patient_name = p.get("name", "")
+                        break
+
+            out.append({
+                "room_id": r.get("room_id", ""),
+                "patient_id": pid,
+                "patient_name": patient_name,
+                "status": r.get("status", ""),
+                "queue_status": r.get("queue_status", "waiting"),
+                "assigned_to": r.get("assigned_to"),
+                "urgency_level": tr.get("urgency_level", ""),
+                "chief_complaint": tr.get("chief_complaint", ""),
+                "symptoms": tr.get("symptoms", []),
+                "vitals": tr.get("vitals", {}),
+                "created_at": r.get("created_at", ""),
+            })
+
+        out.sort(key=lambda x: urgency_order.get(x.get("urgency_level", ""), 4))
+        return out[:limit]
+
+    async def claim_session(self, room_id: str, clinician_id: str) -> dict[str, Any] | None:
+        """Assign a session to a clinician. Returns updated session or None if already claimed."""
+        t = self._table("sessions")
+        if t is not None:
+            res = await asyncio.to_thread(
+                lambda: t.update({
+                    "assigned_to": clinician_id,
+                    "queue_status": "in_progress",
+                }).eq("room_id", room_id).is_("assigned_to", None).execute()
+            )
+            if not res.data:
+                return None
+            return res.data[0] if res.data else None
+        sess = self._sessions.get(room_id)
+        if sess is None:
+            return None
+        if sess.get("assigned_to"):
+            return None
+        sess["assigned_to"] = clinician_id
+        sess["queue_status"] = "in_progress"
+        return sess
+
+    async def unclaim_session(self, room_id: str, clinician_id: str) -> dict[str, Any] | None:
+        """Release a session back to the queue. Returns updated session or None."""
+        t = self._table("sessions")
+        if t is not None:
+            res = await asyncio.to_thread(
+                lambda: t.update({
+                    "assigned_to": None,
+                    "queue_status": "waiting",
+                }).eq("room_id", room_id).eq("assigned_to", clinician_id).execute()
+            )
+            return res.data[0] if res.data else None
+        sess = self._sessions.get(room_id)
+        if sess and sess.get("assigned_to") == clinician_id:
+            sess["assigned_to"] = None
+            sess["queue_status"] = "waiting"
+            return sess
+        return None
+
+    # ---- Triage (structured data from Dart agent) ----
+
+    async def upsert_vitals(self, patient_id: str, vitals: dict[str, Any]) -> None:
+        """Upsert vitals into triage_results for a patient."""
+        t = self._table("triage_results")
+        if t is not None:
+            # Try update first, insert if no row exists
+            res = await asyncio.to_thread(
+                lambda: t.update({"vitals": vitals}).eq("patient_id", patient_id).execute()
+            )
+            if not res.data:
+                await asyncio.to_thread(
+                    lambda: t.insert({
+                        "patient_id": patient_id,
+                        "urgency_level": "low",
+                        "vitals": vitals,
+                        "symptoms": [],
+                    }).execute()
+                )
+            return
+        # In-memory: find or create
+        for tr in self._memory.get("triage_results", []):
+            if tr.get("patient_id") == patient_id:
+                tr["vitals"] = {**(tr.get("vitals") or {}), **vitals}
+                return
+        self._mem_append("triage_results", {
+            "patient_id": patient_id,
+            "urgency_level": "low",
+            "vitals": vitals,
+            "symptoms": [],
+        })
+
+    async def append_symptom(self, patient_id: str, symptom: dict[str, Any]) -> None:
+        """Append a symptom to triage_results.symptoms array."""
+        t = self._table("triage_results")
+        if t is not None:
+            # Fetch current symptoms, append, update
+            res = await asyncio.to_thread(
+                lambda: t.select("symptoms").eq("patient_id", patient_id).execute()
+            )
+            if res.data:
+                current = res.data[0].get("symptoms") or []
+                current.append(symptom)
+                await asyncio.to_thread(
+                    lambda: t.update({"symptoms": current}).eq("patient_id", patient_id).execute()
+                )
+            else:
+                await asyncio.to_thread(
+                    lambda: t.insert({
+                        "patient_id": patient_id,
+                        "urgency_level": "low",
+                        "symptoms": [symptom],
+                        "vitals": {},
+                    }).execute()
+                )
+            return
+        for tr in self._memory.get("triage_results", []):
+            if tr.get("patient_id") == patient_id:
+                tr.setdefault("symptoms", []).append(symptom)
+                return
+        self._mem_append("triage_results", {
+            "patient_id": patient_id,
+            "urgency_level": "low",
+            "symptoms": [symptom],
+            "vitals": {},
+        })
+
+    async def set_urgency(self, patient_id: str, urgency_level: str, reason: str = "") -> None:
+        """Set urgency level and reason in triage_results."""
+        t = self._table("triage_results")
+        if t is not None:
+            res = await asyncio.to_thread(
+                lambda: t.update({
+                    "urgency_level": urgency_level,
+                    "reason": reason,
+                }).eq("patient_id", patient_id).execute()
+            )
+            if not res.data:
+                await asyncio.to_thread(
+                    lambda: t.insert({
+                        "patient_id": patient_id,
+                        "urgency_level": urgency_level,
+                        "reason": reason,
+                        "symptoms": [],
+                        "vitals": {},
+                    }).execute()
+                )
+            return
+        for tr in self._memory.get("triage_results", []):
+            if tr.get("patient_id") == patient_id:
+                tr["urgency_level"] = urgency_level
+                tr["reason"] = reason
+                return
+        self._mem_append("triage_results", {
+            "patient_id": patient_id,
+            "urgency_level": urgency_level,
+            "reason": reason,
+            "symptoms": [],
+            "vitals": {},
+        })
+
+    # ---- Bookings (cancel/reschedule) ----
+
+    async def update_booking(self, booking_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Update a booking's slot, reason, or status."""
+        t = self._table("bookings")
+        if t is not None:
+            updates = {k: v for k, v in data.items() if k in ("slot", "reason", "status")}
+            res = await asyncio.to_thread(
+                lambda: t.update(updates).eq("id", booking_id).execute()
+            )
+            return res.data[0] if res.data else None
+        for b in self._bookings:
+            if b.get("id") == booking_id:
+                b.update({k: v for k, v in data.items() if k in ("slot", "reason", "status")})
+                return b
+        return None
+
+    async def cancel_booking(self, booking_id: str) -> dict[str, Any] | None:
+        """Soft-cancel a booking (set status to cancelled)."""
+        return await self.update_booking(booking_id, {"status": "cancelled"})
+
+    # ---- Follow-ups ----
+
+    async def create_follow_up(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Schedule a follow-up check-in."""
+        t = self._table("follow_ups")
+        row = {
+            "patient_id": data["patient_id"],
+            "session_room_id": data.get("session_room_id", ""),
+            "urgency_level": data["urgency_level"],
+            "reason": data.get("reason", ""),
+            "summary_snapshot": data.get("summary_snapshot", {}),
+            "scheduled_for": data["scheduled_for"],
+            "status": "pending",
+        }
+        if t is not None:
+            res = await asyncio.to_thread(lambda: t.insert(self._for_supabase(row)).execute())
+            return res.data[0] if res.data else row
+        row["id"] = len(self._memory.get("follow_ups", [])) + 1
+        self._mem_append("follow_ups", row)
+        return row
+
+    async def list_follow_ups(
+        self, patient_id: str = "", status: str = "pending"
+    ) -> list[dict[str, Any]]:
+        """List follow-ups, optionally filtered by patient and status."""
+        t = self._table("follow_ups")
+        if t is not None:
+            q = t.select("*")
+            if patient_id:
+                q = q.eq("patient_id", patient_id)
+            if status:
+                q = q.eq("status", status)
+            res = await asyncio.to_thread(q.order, "scheduled_for", desc=False)
+            return res.execute().data
+        rows = self._memory.get("follow_ups", [])
+        if patient_id:
+            rows = [r for r in rows if r.get("patient_id") == patient_id]
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        return rows
+
+    async def update_follow_up(self, follow_up_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Update follow-up status (complete or dismiss)."""
+        t = self._table("follow_ups")
+        if t is not None:
+            updates = {k: v for k, v in data.items() if k in ("status",)}
+            res = await asyncio.to_thread(
+                lambda: t.update(updates).eq("id", follow_up_id).execute()
+            )
+            return res.data[0] if res.data else None
+        for fu in self._memory.get("follow_ups", []):
+            if fu.get("id") == follow_up_id:
+                fu.update({k: v for k, v in data.items() if k in ("status",)})
+                return fu
+        return None
+
     # ---- RAG knowledge base ----
 
     async def upsert_knowledge(self, chunks: list[dict[str, Any]]) -> int:

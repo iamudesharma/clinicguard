@@ -143,6 +143,188 @@ class ApiClient {
     return jsonDecode(res.body) as List<dynamic>;
   }
 
+  // ---- Queue (clinician dashboard) ----
+
+  /// Fetches sessions for the clinician queue, ordered by urgency.
+  Future<List<dynamic>> fetchQueue({String status = ''}) async {
+    var uri = Uri.parse('${AppConfig.apiBaseUrl}/queue');
+    if (status.isNotEmpty) {
+      uri = uri.replace(queryParameters: {'status': status});
+    }
+    final res = await _client.get(uri).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'queue request failed (${res.statusCode})'));
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['sessions'] as List;
+  }
+
+  /// Claims a session for the current clinician.
+  Future<Map<String, dynamic>> claimSession(String roomId) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/sessions/$roomId/claim');
+    final res = await _client
+        .post(uri, headers: {'Content-Type': 'application/json'})
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'claim failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Unclaims a session (releases back to queue).
+  Future<Map<String, dynamic>> unclaimSession(String roomId) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/sessions/$roomId/unclaim');
+    final res = await _client
+        .post(uri, headers: {'Content-Type': 'application/json'})
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'unclaim failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---- Bookings (cancel/reschedule) ----
+
+  /// Updates a booking (reschedule or change reason).
+  Future<Map<String, dynamic>> updateBooking(
+    String bookingId, {
+    String slot = '',
+    String reason = '',
+  }) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/bookings/$bookingId');
+    final body = <String, dynamic>{};
+    if (slot.isNotEmpty) body['slot'] = slot;
+    if (reason.isNotEmpty) body['reason'] = reason;
+    final res = await _client
+        .put(uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body))
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'booking update failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Soft-deletes a booking (sets status to cancelled).
+  Future<Map<String, dynamic>> deleteBooking(String bookingId) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/bookings/$bookingId');
+    final res = await _client.delete(uri).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'booking delete failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---- Follow-ups ----
+
+  /// Lists follow-ups for a patient.
+  Future<List<dynamic>> fetchFollowUps({
+    String patientId = '',
+    String status = 'pending',
+  }) async {
+    final params = <String, String>{};
+    if (patientId.isNotEmpty) params['patient_id'] = patientId;
+    if (status.isNotEmpty) params['status'] = status;
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/follow-ups')
+        .replace(queryParameters: params);
+    final res = await _client.get(uri).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(
+          _detail(res, 'follow-ups request failed (${res.statusCode})'));
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['follow_ups'] as List;
+  }
+
+  /// Creates a follow-up (called by agent at call end).
+  Future<Map<String, dynamic>> createFollowUp({
+    required String patientId,
+    String sessionRoomId = '',
+    required String urgencyLevel,
+    String reason = '',
+    Map<String, dynamic> summarySnapshot = const {},
+    required String scheduledFor,
+  }) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/follow-ups');
+    final res = await _client
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'patient_id': patientId,
+            'session_room_id': sessionRoomId,
+            'urgency_level': urgencyLevel,
+            'reason': reason,
+            'summary_snapshot': summarySnapshot,
+            'scheduled_for': scheduledFor,
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception(
+          _detail(res, 'follow-up creation failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  /// Updates follow-up status (complete or dismiss).
+  Future<Map<String, dynamic>> updateFollowUp(
+      int followUpId, String status) async {
+    final uri =
+        Uri.parse('${AppConfig.apiBaseUrl}/follow-ups/$followUpId');
+    final res = await _client
+        .put(uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'status': status}))
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(
+          _detail(res, 'follow-up update failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  // ---- Hospitals (demo) ----
+
+  /// Fetches nearby hospitals (demo: hardcoded data).
+  Future<List<dynamic>> fetchNearbyHospitals({
+    double lat = 0.0,
+    double lng = 0.0,
+  }) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/hospitals/nearby')
+        .replace(queryParameters: {
+      'lat': lat.toString(),
+      'lng': lng.toString(),
+    });
+    final res = await _client.get(uri).timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(
+          _detail(res, 'hospitals request failed (${res.statusCode})'));
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['hospitals'] as List;
+  }
+
+  // ---- Share ----
+
+  /// Generates a shareable summary (demo: returns formatted text).
+  Future<Map<String, dynamic>> shareSession(
+    String roomId, {
+    String method = 'sms',
+    String recipient = '',
+  }) async {
+    final uri = Uri.parse('${AppConfig.apiBaseUrl}/sessions/$roomId/share');
+    final res = await _client
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'method': method, 'recipient': recipient}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (res.statusCode != 200) {
+      throw Exception(_detail(res, 'share failed (${res.statusCode})'));
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   String _detail(http.Response res, String fallback) {
     try {
       final body = jsonDecode(res.body) as Map<String, dynamic>;

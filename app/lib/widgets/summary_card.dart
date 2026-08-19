@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/care_card.dart';
 import '../theme/app_theme.dart';
 import 'glass_card.dart';
 import 'gradient_text.dart';
@@ -8,8 +9,9 @@ import 'gradient_text.dart';
 /// structured triage tags, and clinical recommendation list.
 class SummaryCard extends StatelessWidget {
   final Map<String, dynamic> summary;
+  final VoidCallback? onShare;
 
-  const SummaryCard({super.key, required this.summary});
+  const SummaryCard({super.key, required this.summary, this.onShare});
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +168,36 @@ class SummaryCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => CareCardService.shareText(summary),
+                  icon: const Icon(Icons.share_outlined, size: 16),
+                  label: const Text('Share Summary', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.inkMuted,
+                    side: BorderSide(color: AppColors.borderGlass),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => CareCardService.sharePdf(summary),
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                  label: const Text('Export PDF', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.inkMuted,
+                    side: BorderSide(color: AppColors.borderGlass),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
