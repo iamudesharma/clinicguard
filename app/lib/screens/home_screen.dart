@@ -112,14 +112,13 @@ class _HomeScreenState extends State<HomeScreen> {
                         onTap: () => _showPatientPicker(context),
                       ),
                     ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
 

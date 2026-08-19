@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import 'config.dart';
+import 'services/platform_stt.dart';
 import 'screens/auth_screen.dart';
 import 'screens/bookings_screen.dart';
 import 'screens/emergency_screen.dart';
